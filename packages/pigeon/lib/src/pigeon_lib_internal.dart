@@ -18,6 +18,7 @@ import 'package:yaml/yaml.dart' as yaml;
 
 import 'ast.dart';
 import 'ast_generator.dart';
+import 'cpp/cpp_ffi_generator.dart';
 import 'cpp/cpp_generator.dart';
 import 'dart/dart_generator.dart';
 import 'generator_tools.dart';
@@ -44,6 +45,7 @@ class InternalPigeonOptions {
     required this.cppOptions,
     required this.gobjectOptions,
     required this.dartOptions,
+    this.cppFfiOptions,
     this.copyrightHeader,
     this.astOut,
     this.debugGenerators,
@@ -110,6 +112,17 @@ class InternalPigeonOptions {
               options.cppOptions ?? const CppOptions(),
               cppHeaderOut: options.cppHeaderOut!,
               cppSourceOut: options.cppSourceOut!,
+              copyrightHeader: copyrightHeader,
+            ),
+      cppFfiOptions = (options.cppFfiHeaderOut == null || options.cppFfiSourceOut == null)
+          ? null
+          : InternalCppFfiOptions.fromCppFfiOptions(
+              options.cppFfiOptions ?? const CppFfiOptions(),
+              cppFfiHeaderOut: options.cppFfiHeaderOut!,
+              cppFfiSourceOut: options.cppFfiSourceOut!,
+              fallbackApiHeaderIncludePath:
+                  options.cppOptions?.headerIncludePath ??
+                  (options.cppHeaderOut == null ? '' : path.basename(options.cppHeaderOut!)),
               copyrightHeader: copyrightHeader,
             ),
       gobjectOptions = options.gobjectHeaderOut == null || options.gobjectSourceOut == null
@@ -189,6 +202,9 @@ class InternalPigeonOptions {
 
   /// Options that control how C++ will be generated.
   final InternalCppOptions? cppOptions;
+
+  /// Options that control how C++ FFI adapter code will be generated.
+  final InternalCppFfiOptions? cppFfiOptions;
 
   /// Options that control how GObject source will be generated.
   final InternalGObjectOptions? gobjectOptions;
@@ -660,6 +676,48 @@ class CppGeneratorAdapter implements GeneratorAdapter {
     _errorOnSealedClass(errors, languageString, root);
     _errorOnInheritedClass(errors, languageString, root);
     return errors;
+  }
+}
+
+/// A [GeneratorAdapter] that generates C++ FFI adapter code.
+class CppFfiGeneratorAdapter implements GeneratorAdapter {
+  /// Constructor for [CppFfiGeneratorAdapter].
+  const CppFfiGeneratorAdapter();
+
+  /// A string representing the name of the language being generated.
+  static const String languageString = 'C++ FFI';
+
+  @override
+  List<FileType> get fileTypeList => const <FileType>[FileType.header, FileType.source];
+
+  @override
+  void generate(StringSink sink, InternalPigeonOptions options, Root root, FileType fileType) {
+    if (options.cppFfiOptions == null) {
+      return;
+    }
+    final outputFileOptions = OutputFileOptions<InternalCppFfiOptions>(
+      fileType: fileType,
+      languageOptions: options.cppFfiOptions!,
+    );
+    const generator = CppFfiGenerator();
+    generator.generate(outputFileOptions, root, sink, dartPackageName: options.dartPackageName);
+  }
+
+  @override
+  IOSink? shouldGenerate(InternalPigeonOptions options, FileType fileType) {
+    if (fileType == FileType.source) {
+      return _openSink(options.cppFfiOptions?.cppFfiSourceOut, basePath: options.basePath ?? '');
+    } else {
+      return _openSink(options.cppFfiOptions?.cppFfiHeaderOut, basePath: options.basePath ?? '');
+    }
+  }
+
+  @override
+  List<Error> validate(InternalPigeonOptions options, Root root) {
+    if (options.cppFfiOptions == null) {
+      return <Error>[];
+    }
+    return validateCppFfi(options.cppFfiOptions!, root);
   }
 }
 

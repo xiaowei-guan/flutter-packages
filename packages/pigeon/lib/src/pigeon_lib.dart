@@ -19,6 +19,7 @@ import 'package:meta/meta.dart' show visibleForTesting;
 import 'package:path/path.dart' as path;
 
 import 'ast.dart';
+import 'cpp/cpp_ffi_generator.dart';
 import 'cpp/cpp_generator.dart';
 import 'dart/dart_generator.dart';
 import 'generator_tools.dart' as generator_tools;
@@ -259,6 +260,9 @@ class PigeonOptions {
     this.cppHeaderOut,
     this.cppSourceOut,
     this.cppOptions,
+    this.cppFfiHeaderOut,
+    this.cppFfiSourceOut,
+    this.cppFfiOptions,
     this.gobjectHeaderOut,
     this.gobjectSourceOut,
     this.gobjectOptions,
@@ -339,6 +343,15 @@ class PigeonOptions {
   /// Options that control how C++ will be generated.
   final CppOptions? cppOptions;
 
+  /// Path to the C ABI ".h" C++ FFI adapter file that will be generated.
+  final String? cppFfiHeaderOut;
+
+  /// Path to the C ABI ".cpp" C++ FFI adapter file that will be generated.
+  final String? cppFfiSourceOut;
+
+  /// Options that control how C++ FFI adapter code will be generated.
+  final CppFfiOptions? cppFfiOptions;
+
   /// Path to the ".h" GObject file that will be generated.
   final String? gobjectHeaderOut;
 
@@ -405,6 +418,11 @@ class PigeonOptions {
       cppOptions: map.containsKey('cppOptions')
           ? CppOptions.fromMap(map['cppOptions']! as Map<String, Object>)
           : null,
+      cppFfiHeaderOut: map['cppFfiHeaderOut'] as String?,
+      cppFfiSourceOut: map['cppFfiSourceOut'] as String?,
+      cppFfiOptions: map.containsKey('cppFfiOptions')
+          ? CppFfiOptions.fromMap(map['cppFfiOptions']! as Map<String, Object>)
+          : null,
       gobjectHeaderOut: map['gobjectHeaderOut'] as String?,
       gobjectSourceOut: map['gobjectSourceOut'] as String?,
       gobjectOptions: map.containsKey('gobjectOptions')
@@ -443,6 +461,9 @@ class PigeonOptions {
       if (cppHeaderOut != null) 'cppHeaderOut': cppHeaderOut!,
       if (cppSourceOut != null) 'cppSourceOut': cppSourceOut!,
       if (cppOptions != null) 'cppOptions': cppOptions!.toMap(),
+      if (cppFfiHeaderOut != null) 'cppFfiHeaderOut': cppFfiHeaderOut!,
+      if (cppFfiSourceOut != null) 'cppFfiSourceOut': cppFfiSourceOut!,
+      if (cppFfiOptions != null) 'cppFfiOptions': cppFfiOptions!.toMap(),
       if (gobjectHeaderOut != null) 'gobjectHeaderOut': gobjectHeaderOut!,
       if (gobjectSourceOut != null) 'gobjectSourceOut': gobjectSourceOut!,
       if (gobjectOptions != null) 'gobjectOptions': gobjectOptions!.toMap(),
@@ -638,6 +659,12 @@ ${_argParser.usage}''';
       aliases: const <String>['experimental_cpp_source_out'],
     )
     ..addOption('cpp_namespace', help: 'The namespace that generated C++ code will be in.')
+    ..addOption('cpp_ffi_header_out', help: 'Path to generated C++ FFI C ABI header file (.h).')
+    ..addOption('cpp_ffi_source_out', help: 'Path to generated C++ FFI adapter source file (.cpp).')
+    ..addOption(
+      'cpp_ffi_api_header_include_path',
+      help: 'The generated C++ API header include path used by the generated C++ FFI header.',
+    )
     ..addOption(
       'cpp_header_include_path',
       help: 'The path to the header that will get placed in the C++ source file.',
@@ -760,6 +787,12 @@ ${_argParser.usage}''';
         headerIncludePath: results['cpp_header_include_path'] as String?,
         headerOutPath: results['cpp_header_out_path'] as String?,
       ),
+      cppFfiHeaderOut: results['cpp_ffi_header_out'] as String?,
+      cppFfiSourceOut: results['cpp_ffi_source_out'] as String?,
+      cppFfiOptions: CppFfiOptions(
+        namespace: results['cpp_namespace'] as String?,
+        apiHeaderIncludePath: results['cpp_ffi_api_header_include_path'] as String?,
+      ),
       gobjectHeaderOut: results['gobject_header_out'] as String?,
       gobjectSourceOut: results['gobject_source_out'] as String?,
       gobjectOptions: GObjectOptions(
@@ -830,6 +863,7 @@ ${_argParser.usage}''';
           const KotlinGeneratorAdapter(),
           const JnigenConfigGeneratorAdapter(),
           const CppGeneratorAdapter(),
+          const CppFfiGeneratorAdapter(),
           const GObjectGeneratorAdapter(),
           const DartTestGeneratorAdapter(),
           const ObjcGeneratorAdapter(),

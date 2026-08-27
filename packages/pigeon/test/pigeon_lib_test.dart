@@ -170,6 +170,20 @@ void main() {
     expect(opts.cppSourceOut, equals('foo.cpp'));
   });
 
+  test('parse args - cpp_ffi outputs', () {
+    final PigeonOptions opts = Pigeon.parseArgs(<String>[
+      '--cpp_ffi_header_out',
+      'foo_ffi.h',
+      '--cpp_ffi_source_out',
+      'foo_ffi.cpp',
+      '--cpp_ffi_api_header_include_path',
+      'foo.h',
+    ]);
+    expect(opts.cppFfiHeaderOut, equals('foo_ffi.h'));
+    expect(opts.cppFfiSourceOut, equals('foo_ffi.cpp'));
+    expect(opts.cppFfiOptions?.apiHeaderIncludePath, equals('foo.h'));
+  });
+
   test('parse args - ast_out', () {
     final PigeonOptions opts = Pigeon.parseArgs(<String>['--ast_out', 'stdout']);
     expect(opts.astOut, equals('stdout'));
