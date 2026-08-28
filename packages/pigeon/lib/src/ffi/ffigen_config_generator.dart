@@ -21,7 +21,7 @@ class InternalFfiGenConfigOptions extends InternalOptions {
     this.copyrightHeader,
   });
 
-  /// Path to the generated ffigen config file.
+  /// Path to the generated ffigen config file used to run ffigen.
   final String configOut;
 
   /// Path to the ffigen-generated Dart binding file.
@@ -94,6 +94,9 @@ class FfiGenConfigGenerator extends Generator<InternalFfiGenConfigOptions> {
 /// Validates ffigen config generation options.
 List<Error> validateFfiGenConfig(InternalFfiGenConfigOptions options, Root root) {
   final errors = <Error>[];
+  if (options.configOut == 'stdout') {
+    errors.add(Error(message: 'ffigen config generation requires a file output path'));
+  }
   if (options.dartOut.isEmpty) {
     errors.add(Error(message: 'ffigen config generation requires a Dart FFI output path'));
   }

@@ -47,7 +47,7 @@ void main() {
 
     final errors = validateFfiGenConfig(
       const InternalFfiGenConfigOptions(
-        configOut: 'ffigen.yaml',
+        configOut: 'stdout',
         dartOut: '',
         ffiHeaderPath: '',
         bindingClassName: 'MessagesFfiBindings',
@@ -56,6 +56,10 @@ void main() {
       root,
     );
 
+    expect(
+      errors.map((error) => error.message),
+      contains('ffigen config generation requires a file output path'),
+    );
     expect(
       errors.map((error) => error.message),
       contains('ffigen config generation requires a Dart FFI output path'),
