@@ -388,7 +388,27 @@ class DartGeneratorAdapter implements GeneratorAdapter {
       _openSink(options.dartOptions?.dartOut, basePath: options.basePath ?? '');
 
   @override
-  List<Error> validate(InternalPigeonOptions options, Root root) => <Error>[];
+  List<Error> validate(InternalPigeonOptions options, Root root) {
+    final dartFfiOptions = options.dartOptions?.ffiOptions;
+    if (dartFfiOptions == null) {
+      return <Error>[];
+    }
+
+    final errors = <Error>[];
+    if (dartFfiOptions.bindingImportPath.isEmpty) {
+      errors.add(Error(message: 'Dart FFI requires a binding import path'));
+    }
+    for (final AstHostApi api in root.apis.whereType<AstHostApi>()) {
+      for (final Method method in api.methods) {
+        if (method.isAsynchronous || method.isAsynchronousCallback) {
+          errors.add(
+            Error(message: 'Dart FFI does not support async HostApi method "${method.name}"'),
+          );
+        }
+      }
+    }
+    return errors;
+  }
 }
 
 /// A [GeneratorAdapter] that generates Dart test source code.

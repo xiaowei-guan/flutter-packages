@@ -182,6 +182,61 @@ void main() {
     expect(code, contains('Future<Output> doSomething(Input input)'));
   });
 
+  test('gen host api with FFI binding', () {
+    final root = Root(
+      apis: <Api>[
+        AstHostApi(
+          name: 'Api',
+          methods: <Method>[
+            Method(
+              name: 'add',
+              location: ApiLocation.host,
+              parameters: <Parameter>[
+                Parameter(
+                  name: 'x',
+                  type: const TypeDeclaration(isNullable: false, baseName: 'int'),
+                ),
+                Parameter(
+                  name: 'y',
+                  type: const TypeDeclaration(isNullable: false, baseName: 'int'),
+                ),
+              ],
+              returnType: const TypeDeclaration(baseName: 'int', isNullable: false),
+            ),
+          ],
+        ),
+      ],
+      classes: <Class>[],
+      enums: <Enum>[],
+    );
+    final sink = StringBuffer();
+    const generator = DartGenerator();
+    generator.generate(
+      const InternalDartOptions(
+        ffiOptions: InternalDartFfiOptions(
+          bindingImportPath: 'messages.g.ffi.dart',
+          bindingClassName: 'MessagesFfiBindings',
+          nativeLibraryExpression: 'openLibrary()',
+        ),
+        ignoreLints: false,
+      ),
+      root,
+      sink,
+      dartPackageName: DEFAULT_PACKAGE_NAME,
+    );
+    final code = sink.toString();
+    expect(code, contains("import 'dart:ffi' as ffi;"));
+    expect(code, contains("import 'package:ffi/ffi.dart' as pkg_ffi;"));
+    expect(code, contains("import 'messages.g.ffi.dart' as pigeon_ffi;"));
+    expect(code, contains('pigeon_ffi.MessagesFfiBindings? ffiBindings'));
+    expect(code, contains('pigeon_ffi.MessagesFfiBindings(openLibrary())'));
+    expect(code, contains('final ByteData? pigeonVar_requestMessage ='));
+    expect(code, contains('<Object?>[x, y]'));
+    expect(code, contains('pigeonVar_ffiBindings.pigeon_api_add(pigeonVar_request)'));
+    expect(code, contains('pigeonVar_ffiBindings.pigeon_free_buffer(pigeonVar_response)'));
+    expect(code, isNot(contains('BasicMessageChannel<Object?>')));
+  });
+
   test('host multiple args', () {
     final root = Root(
       apis: <Api>[

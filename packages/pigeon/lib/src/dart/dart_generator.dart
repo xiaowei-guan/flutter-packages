@@ -44,9 +44,55 @@ const String _ffiBridgePrefix = 'ffi_bridge';
 /// The default library import prefix for generated Dart JNI bridge code.
 const String _jniBridgePrefix = 'jni_bridge';
 
+const String _pigeonFfiPrefix = 'pigeon_ffi';
+
+const String _pigeonFfiBindings = '${varNamePrefix}ffiBindings';
+
+const String _defaultPigeonFfiBindings = '_${varNamePrefix}defaultFfiBindings';
+
 /// Name of the overrides class for overriding constructors and static members
 /// of Dart proxy classes.
 const String proxyApiOverridesClassName = '${proxyApiClassNamePrefix}Overrides';
+
+/// Options that control how Dart FFI code will be generated.
+class DartFfiOptions {
+  /// Constructor for DartFfiOptions.
+  const DartFfiOptions({
+    required this.bindingImportPath,
+    this.bindingClassName = 'NativeLibrary',
+    this.nativeLibraryExpression = 'ffi.DynamicLibrary.process()',
+  });
+
+  /// Import path for the ffigen-generated low-level binding.
+  final String bindingImportPath;
+
+  /// Name of the ffigen-generated binding class.
+  final String bindingClassName;
+
+  /// Dart expression used to create the default native library.
+  final String nativeLibraryExpression;
+
+  /// Creates a [DartFfiOptions] from a Map representation where:
+  /// `x = DartFfiOptions.fromMap(x.toMap())`.
+  static DartFfiOptions fromMap(Map<String, Object> map) {
+    return DartFfiOptions(
+      bindingImportPath: map['bindingImportPath']! as String,
+      bindingClassName: (map['bindingClassName'] as String?) ?? 'NativeLibrary',
+      nativeLibraryExpression:
+          (map['nativeLibraryExpression'] as String?) ?? 'ffi.DynamicLibrary.process()',
+    );
+  }
+
+  /// Converts a [DartFfiOptions] to a Map representation where:
+  /// `x = DartFfiOptions.fromMap(x.toMap())`.
+  Map<String, Object> toMap() {
+    return <String, Object>{
+      'bindingImportPath': bindingImportPath,
+      'bindingClassName': bindingClassName,
+      'nativeLibraryExpression': nativeLibraryExpression,
+    };
+  }
+}
 
 /// Options that control how Dart code will be generated.
 class DartOptions {
@@ -56,6 +102,7 @@ class DartOptions {
     this.sourceOutPath,
     this.testOutPath,
     this.dartOut,
+    this.ffiOptions,
     bool ignoreLints = true,
   }) : _ignoreLints = ignoreLints;
 
@@ -71,6 +118,9 @@ class DartOptions {
   /// Path to output generated Dart file.
   final String? dartOut;
 
+  /// Options that control how Dart FFI code will be generated.
+  final DartFfiOptions? ffiOptions;
+
   /// Whether to ignore lint violations in generated Dart code.
   final bool _ignoreLints;
 
@@ -83,6 +133,9 @@ class DartOptions {
       sourceOutPath: map['sourceOutPath'] as String?,
       testOutPath: map['testOutPath'] as String?,
       dartOut: map['dartOut'] as String?,
+      ffiOptions: map.containsKey('ffiOptions')
+          ? DartFfiOptions.fromMap(map['ffiOptions']! as Map<String, Object>)
+          : null,
       ignoreLints: (map['ignoreLints'] as bool?) ?? true,
     );
   }
@@ -95,6 +148,7 @@ class DartOptions {
       if (sourceOutPath != null) 'sourceOutPath': sourceOutPath!,
       if (testOutPath != null) 'testOutPath': testOutPath!,
       if (dartOut != null) 'dartOut': dartOut!,
+      if (ffiOptions != null) 'ffiOptions': ffiOptions!.toMap(),
       'ignoreLints': _ignoreLints,
     };
     return result;
@@ -596,6 +650,7 @@ class InternalDartOptions extends InternalOptions {
     this.useFfi = false,
     this.ffiErrorClassName,
     this.jniErrorClassName,
+    this.ffiOptions,
     required bool ignoreLints,
   }) : _ignoreLints = ignoreLints;
 
@@ -613,6 +668,9 @@ class InternalDartOptions extends InternalOptions {
   }) : copyrightHeader = copyrightHeader ?? options.copyrightHeader,
        dartOut = (dartOut ?? options.sourceOutPath)!,
        testOut = testOut ?? options.testOutPath,
+       ffiOptions = options.ffiOptions == null
+           ? null
+           : InternalDartFfiOptions.fromDartFfiOptions(options.ffiOptions!),
        _ignoreLints = options._ignoreLints;
 
   /// A copyright header that will get prepended to generated code.
@@ -639,12 +697,42 @@ class InternalDartOptions extends InternalOptions {
   /// The error class name used for JNI methods.
   final String? jniErrorClassName;
 
+  /// Options that control how Dart FFI code will be generated.
+  final InternalDartFfiOptions? ffiOptions;
+
   /// Whether to ignore lint violations in generated Dart code.
   final bool _ignoreLints;
 }
 
 // Prefix used mapping prefixed class names for language outputs.
 String _classNamePrefix = '';
+
+/// Options that control how Dart FFI code will be generated.
+///
+/// For internal use only.
+class InternalDartFfiOptions {
+  /// Creates an [InternalDartFfiOptions].
+  const InternalDartFfiOptions({
+    required this.bindingImportPath,
+    required this.bindingClassName,
+    required this.nativeLibraryExpression,
+  });
+
+  /// Creates an [InternalDartFfiOptions] from [DartFfiOptions].
+  InternalDartFfiOptions.fromDartFfiOptions(DartFfiOptions options)
+    : bindingImportPath = options.bindingImportPath,
+      bindingClassName = options.bindingClassName,
+      nativeLibraryExpression = options.nativeLibraryExpression;
+
+  /// Import path for the ffigen-generated low-level binding.
+  final String bindingImportPath;
+
+  /// Name of the ffigen-generated binding class.
+  final String bindingClassName;
+
+  /// Dart expression used to create the default native library.
+  final String nativeLibraryExpression;
+}
 
 /// Class that manages all Dart code generation.
 class DartGenerator extends StructuredGenerator<InternalDartOptions> {
@@ -692,6 +780,10 @@ class DartGenerator extends StructuredGenerator<InternalDartOptions> {
     Indent indent, {
     required String dartPackageName,
   }) {
+    final bool usesFfi = generatorOptions.ffiOptions != null;
+    if (usesFfi) {
+      indent.writeln("import 'dart:ffi' as ffi;");
+    }
     indent.writeln("import 'dart:async';");
     if (generatorOptions.useFfi) {
       indent.writeln("import 'dart:ffi';");
@@ -709,11 +801,19 @@ class DartGenerator extends StructuredGenerator<InternalDartOptions> {
       if (usesNativeInterop(generatorOptions)) 'TypedData',
     ];
     indent.writeln("import 'dart:typed_data' show ${typedDataClasses.join(', ')};");
+
+    final String typedDataTypes = usesFfi
+        ? 'ByteData, Float64List, Int32List, Int64List, Uint8List'
+        : 'Float64List, Int32List, Int64List';
+    indent.writeln("import 'dart:typed_data' show $typedDataTypes;");
     indent.newln();
     if (generatorOptions.useFfi) {
       indent.writeln("import 'package:ffi/ffi.dart';");
     }
 
+    if (usesFfi) {
+      indent.writeln("import 'package:ffi/ffi.dart' as pkg_ffi;");
+    }
     indent.writeln("import 'package:flutter/services.dart';");
     if (root.containsProxyApi) {
       indent.writeln("import 'package:flutter/widgets.dart' show WidgetsFlutterBinding;");
@@ -734,6 +834,13 @@ class DartGenerator extends StructuredGenerator<InternalDartOptions> {
       final String jniFileImportName = path.basename(generatorOptions.dartOut!);
       indent.writeln(
         "import './${path.withoutExtension(jniFileImportName)}.jni.dart' as $_jniBridgePrefix;",
+      );
+    }
+
+    if (generatorOptions.ffiOptions != null) {
+      indent.writeln(
+        "import '${_escapeForDartSingleQuotedString(generatorOptions.ffiOptions!.bindingImportPath)}' "
+        'as $_pigeonFfiPrefix;',
       );
     }
   }
@@ -1968,6 +2075,12 @@ return ${generatorOptions.useJni ? 'await ' : ''}completer.future;
         dartPackageName: dartPackageName,
       );
     }
+
+    if (generatorOptions.ffiOptions != null) {
+      _writeFfiHostApi(generatorOptions.ffiOptions!, indent, api);
+      return;
+    }
+
     indent.newln();
     addDocumentationComments(indent, api.documentationComments, docCommentSpec);
     indent.write('class ${api.name} ');
@@ -2055,6 +2168,48 @@ ${api.name}({
           useJni: generatorOptions.useJni,
           useFfi: generatorOptions.useFfi,
         );
+      }
+    });
+  }
+
+  void _writeFfiHostApi(InternalDartFfiOptions options, Indent indent, AstHostApi api) {
+    indent.newln();
+    var first = true;
+    addDocumentationComments(indent, api.documentationComments, docCommentSpec);
+    indent.write('class ${api.name} ');
+    indent.addScoped('{', '}', () {
+      indent.format('''
+/// Constructor for [${api.name}].
+${api.name}({
+\tBinaryMessenger? binaryMessenger,
+\tString messageChannelSuffix = '',
+\t$_pigeonFfiPrefix.${options.bindingClassName}? ffiBindings,
+}) : $_pigeonFfiBindings = ffiBindings ?? $_defaultPigeonFfiBindings {
+\tif (binaryMessenger != null) {
+\t\tthrow ArgumentError.value(binaryMessenger, 'binaryMessenger', 'BinaryMessenger is not supported by FFI HostApi.');
+\t}
+\tif (messageChannelSuffix.isNotEmpty) {
+\t\tthrow ArgumentError.value(messageChannelSuffix, 'messageChannelSuffix', 'messageChannelSuffix is not supported by FFI HostApi.');
+\t}
+}
+
+static final $_pigeonFfiPrefix.${options.bindingClassName} $_defaultPigeonFfiBindings =
+\t\t$_pigeonFfiPrefix.${options.bindingClassName}(${options.nativeLibraryExpression});
+
+final $_pigeonFfiPrefix.${options.bindingClassName} $_pigeonFfiBindings;
+''');
+
+      indent.writeln(
+        'static const MessageCodec<Object?> $pigeonChannelCodec = $_pigeonMessageCodec();',
+      );
+      indent.newln();
+      for (final Method func in api.methods) {
+        if (!first) {
+          indent.newln();
+        } else {
+          first = false;
+        }
+        _writeFfiHostMethod(indent, api: api, method: func);
       }
     });
   }
@@ -2475,6 +2630,9 @@ ${api.name}({
   }) {
     if (root.containsHostApi || root.containsProxyApi) {
       _writeExtractReplyValueOrThrow(indent);
+    }
+    if (generatorOptions.ffiOptions != null) {
+      _writeFfiUtilities(indent);
     }
     if (root.containsFlutterApi || root.containsProxyApi || generatorOptions.testOut != null) {
       _writeWrapResponse(generatorOptions, root, indent);
@@ -2953,6 +3111,45 @@ Object? _getValueFromPigeonTypedData($_ffiBridgePrefix.${_classNamePrefix}Pigeon
     ''');
   }
 
+  /// Writes Dart FFI helper methods.
+  void _writeFfiUtilities(Indent indent) {
+    indent.newln();
+    indent.format('''
+ffi.Pointer<$_pigeonFfiPrefix.PigeonFfiBuffer> _encodeFfiRequest(ByteData? message) {
+\tif (message == null) {
+\t\treturn ffi.nullptr;
+\t}
+\tfinal Uint8List bytes = message.buffer.asUint8List(message.offsetInBytes, message.lengthInBytes);
+\tfinal ffi.Pointer<ffi.Uint8> data = pkg_ffi.calloc<ffi.Uint8>(bytes.length);
+\tdata.asTypedList(bytes.length).setAll(0, bytes);
+\tfinal ffi.Pointer<$_pigeonFfiPrefix.PigeonFfiBuffer> buffer =
+\t\t\tpkg_ffi.calloc<$_pigeonFfiPrefix.PigeonFfiBuffer>();
+\tbuffer.ref.data = data;
+\tbuffer.ref.length = bytes.length;
+\treturn buffer;
+}
+
+void _freeFfiRequest(ffi.Pointer<$_pigeonFfiPrefix.PigeonFfiBuffer> buffer) {
+\tif (buffer == ffi.nullptr) {
+\t\treturn;
+\t}
+\tpkg_ffi.calloc.free(buffer.ref.data);
+\tpkg_ffi.calloc.free(buffer);
+}
+
+List<Object?>? _decodeFfiReply(
+\t\tMessageCodec<Object?> codec,
+\t\tffi.Pointer<$_pigeonFfiPrefix.PigeonFfiBuffer> buffer,
+) {
+\tif (buffer == ffi.nullptr || buffer.ref.data == ffi.nullptr) {
+\t\treturn null;
+\t}
+\tfinal Uint8List bytes = Uint8List.fromList(buffer.ref.data.asTypedList(buffer.ref.length));
+\treturn codec.decodeMessage(ByteData.sublistView(bytes)) as List<Object?>?;
+}
+''');
+  }
+
   /// Writes the `wrapResponse` method.
   void _writeWrapResponse(InternalDartOptions opt, Root root, Indent indent) {
     indent.newln();
@@ -3157,6 +3354,74 @@ if (wrapped == null) {
         returnType: returnType,
         addSuffixVariable: addSuffixVariable,
       );
+    });
+  }
+
+  void _writeFfiHostMethod(Indent indent, {required AstHostApi api, required Method method}) {
+    addDocumentationComments(indent, method.documentationComments, docCommentSpec);
+    final String argSignature = _getMethodParameterSignature(method.parameters);
+    indent.write(
+      'Future<${addGenericTypes(method.returnType)}> ${method.name}($argSignature) async ',
+    );
+    indent.addScoped('{', '}', () {
+      _writeFfiHostMethodCall(indent, api: api, method: method);
+    });
+  }
+
+  void _writeFfiHostMethodCall(Indent indent, {required AstHostApi api, required Method method}) {
+    final String requestType = 'ffi.Pointer<$_pigeonFfiPrefix.PigeonFfiBuffer>';
+    if (method.parameters.isEmpty) {
+      indent.writeln('final $requestType ${varNamePrefix}request = ffi.nullptr;');
+    } else {
+      final Iterable<String> argExpressions = indexMap(method.parameters, (
+        int index,
+        NamedType type,
+      ) {
+        return getParameterName(index, type);
+      });
+      indent.writeln(
+        'final ByteData? ${varNamePrefix}requestMessage = $pigeonChannelCodec.encodeMessage('
+        '<Object?>[${argExpressions.join(', ')}]);',
+      );
+      indent.writeln(
+        'final $requestType ${varNamePrefix}request = '
+        '_encodeFfiRequest(${varNamePrefix}requestMessage);',
+      );
+    }
+    indent.writeln(
+      'final String ${varNamePrefix}channelName = \'${_ffiFunctionName(api, method)}\';',
+    );
+    indent.writeln('$requestType ${varNamePrefix}response = ffi.nullptr;');
+    indent.writeScoped('try {', '} finally {', () {
+      indent.writeln(
+        '${varNamePrefix}response = '
+        '$_pigeonFfiBindings.${_ffiFunctionName(api, method)}(${varNamePrefix}request);',
+      );
+      indent.writeln(
+        'final List<Object?>? ${varNamePrefix}replyList = '
+        '_decodeFfiReply($pigeonChannelCodec, ${varNamePrefix}response);',
+      );
+      final extractCall =
+          '''
+_extractReplyValueOrThrow(
+\t\t${varNamePrefix}replyList,
+\t\t${varNamePrefix}channelName,
+\t\tisNullValid: ${method.returnType.isNullable || method.returnType.isVoid},
+)
+''';
+      if (method.returnType.isVoid) {
+        indent.format('$extractCall;');
+      } else {
+        const accessor = '${varNamePrefix}replyValue';
+        indent.format('final Object? $accessor = $extractCall;');
+        indent.format('return ${_castValue(accessor, method.returnType)};');
+      }
+    }, addTrailingNewline: false);
+    indent.addScoped(null, '}', () {
+      indent.writeln('_freeFfiRequest(${varNamePrefix}request);');
+      indent.writeScoped('if (${varNamePrefix}response != ffi.nullptr) {', '}', () {
+        indent.writeln('$_pigeonFfiBindings.pigeon_free_buffer(${varNamePrefix}response);');
+      });
     });
   }
 
@@ -3517,6 +3782,17 @@ String addGenericTypes(TypeDeclaration type, {bool useJni = false, bool useFfi =
           : type.baseName,
   };
   return type.isNullable ? '$genericType?' : genericType;
+}
+
+String _ffiFunctionName(AstHostApi api, Method method) {
+  return 'pigeon_${_snakeCase(api.name)}_${_snakeCase(method.name)}';
+}
+
+String _snakeCase(String name) {
+  return name.replaceAllMapped(
+    RegExp(r'[A-Z]'),
+    (Match match) => '${match.start == 0 ? '' : '_'}${match[0]!.toLowerCase()}',
+  );
 }
 
 /// Converts [inputPath] to a posix absolute path.
