@@ -58,13 +58,13 @@ const String proxyApiOverridesClassName = '${proxyApiClassNamePrefix}Overrides';
 class DartFfiOptions {
   /// Constructor for DartFfiOptions.
   const DartFfiOptions({
-    required this.bindingImportPath,
+    this.bindingImportPath,
     this.bindingClassName = 'NativeLibrary',
     this.nativeLibraryExpression = 'ffi.DynamicLibrary.process()',
   });
 
   /// Import path for the ffigen-generated low-level binding.
-  final String bindingImportPath;
+  final String? bindingImportPath;
 
   /// Name of the ffigen-generated binding class.
   final String bindingClassName;
@@ -76,7 +76,7 @@ class DartFfiOptions {
   /// `x = DartFfiOptions.fromMap(x.toMap())`.
   static DartFfiOptions fromMap(Map<String, Object> map) {
     return DartFfiOptions(
-      bindingImportPath: map['bindingImportPath']! as String,
+      bindingImportPath: map['bindingImportPath'] as String?,
       bindingClassName: (map['bindingClassName'] as String?) ?? 'NativeLibrary',
       nativeLibraryExpression:
           (map['nativeLibraryExpression'] as String?) ?? 'ffi.DynamicLibrary.process()',
@@ -87,7 +87,7 @@ class DartFfiOptions {
   /// `x = DartFfiOptions.fromMap(x.toMap())`.
   Map<String, Object> toMap() {
     return <String, Object>{
-      'bindingImportPath': bindingImportPath,
+      if (bindingImportPath != null) 'bindingImportPath': bindingImportPath!,
       'bindingClassName': bindingClassName,
       'nativeLibraryExpression': nativeLibraryExpression,
     };
@@ -665,12 +665,16 @@ class InternalDartOptions extends InternalOptions {
     this.ffiErrorClassName,
     this.jniErrorClassName,
     this.fileSpecificClassNameComponent,
+    String? fallbackFfiBindingImportPath,
   }) : copyrightHeader = copyrightHeader ?? options.copyrightHeader,
        dartOut = (dartOut ?? options.sourceOutPath)!,
        testOut = testOut ?? options.testOutPath,
        ffiOptions = options.ffiOptions == null
            ? null
-           : InternalDartFfiOptions.fromDartFfiOptions(options.ffiOptions!),
+           : InternalDartFfiOptions.fromDartFfiOptions(
+               options.ffiOptions!,
+               fallbackBindingImportPath: fallbackFfiBindingImportPath ?? '',
+             ),
        _ignoreLints = options._ignoreLints;
 
   /// A copyright header that will get prepended to generated code.
@@ -719,10 +723,12 @@ class InternalDartFfiOptions {
   });
 
   /// Creates an [InternalDartFfiOptions] from [DartFfiOptions].
-  InternalDartFfiOptions.fromDartFfiOptions(DartFfiOptions options)
-    : bindingImportPath = options.bindingImportPath,
-      bindingClassName = options.bindingClassName,
-      nativeLibraryExpression = options.nativeLibraryExpression;
+  InternalDartFfiOptions.fromDartFfiOptions(
+    DartFfiOptions options, {
+    required String fallbackBindingImportPath,
+  }) : bindingImportPath = options.bindingImportPath ?? fallbackBindingImportPath,
+       bindingClassName = options.bindingClassName,
+       nativeLibraryExpression = options.nativeLibraryExpression;
 
   /// Import path for the ffigen-generated low-level binding.
   final String bindingImportPath;

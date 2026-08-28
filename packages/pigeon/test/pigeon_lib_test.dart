@@ -186,6 +186,10 @@ void main() {
 
   test('parse args - dart_ffi options', () {
     final PigeonOptions opts = Pigeon.parseArgs(<String>[
+      '--dart_ffi_out',
+      'lib/messages.g.ffi.dart',
+      '--dart_ffi_config_out',
+      'ffigen.yaml',
       '--dart_ffi_binding_import',
       'messages.g.ffi.dart',
       '--dart_ffi_binding_class',
@@ -193,9 +197,23 @@ void main() {
       '--dart_ffi_native_library',
       'openLibrary()',
     ]);
+    expect(opts.dartFfiOut, equals('lib/messages.g.ffi.dart'));
+    expect(opts.dartFfiConfigOut, equals('ffigen.yaml'));
     expect(opts.dartOptions?.ffiOptions?.bindingImportPath, equals('messages.g.ffi.dart'));
     expect(opts.dartOptions?.ffiOptions?.bindingClassName, equals('MessagesFfiBindings'));
     expect(opts.dartOptions?.ffiOptions?.nativeLibraryExpression, equals('openLibrary()'));
+  });
+
+  test('Dart FFI import path is inferred from dart_ffi_out', () {
+    final options = InternalPigeonOptions.fromPigeonOptions(
+      const PigeonOptions(
+        dartOut: 'lib/src/messages.g.dart',
+        dartFfiOut: 'lib/src/messages.g.ffi.dart',
+        dartOptions: DartOptions(ffiOptions: DartFfiOptions()),
+      ),
+    );
+
+    expect(options.dartOptions?.ffiOptions?.bindingImportPath, equals('messages.g.ffi.dart'));
   });
 
   test('Dart FFI validation rejects async HostApi', () {

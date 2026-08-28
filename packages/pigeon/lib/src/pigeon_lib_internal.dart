@@ -21,6 +21,7 @@ import 'ast_generator.dart';
 import 'cpp/cpp_ffi_generator.dart';
 import 'cpp/cpp_generator.dart';
 import 'dart/dart_generator.dart';
+import 'ffi/ffigen_config_generator.dart';
 import 'generator_tools.dart';
 import 'gobject/gobject_generator.dart';
 import 'java/java_generator.dart';
@@ -30,6 +31,26 @@ import 'objc/objc_generator.dart';
 import 'pigeon_lib.dart';
 import 'swift/ffigen_config_generator.dart';
 import 'swift/swift_generator.dart';
+
+String _getDartFfiBindingImportPath(PigeonOptions options) {
+  final explicitImportPath = options.dartOptions?.ffiOptions?.bindingImportPath;
+  if (explicitImportPath != null) {
+    return explicitImportPath;
+  }
+
+  final dartOut = options.dartOut ?? options.dartOptions?.sourceOutPath;
+  final dartFfiOut = options.dartFfiOut;
+  if (dartOut == null || dartFfiOut == null) {
+    return '';
+  }
+
+  final context = path.Context(style: path.Style.posix);
+  final normalizedDartOut = _normalizeDartPath(dartOut);
+  final normalizedDartFfiOut = _normalizeDartPath(dartFfiOut);
+  return context.relative(normalizedDartFfiOut, from: context.dirname(normalizedDartOut));
+}
+
+String _normalizeDartPath(String path) => path.replaceAll(r'\', '/');
 
 /// Options used when running the code generator.
 class InternalPigeonOptions {
@@ -46,6 +67,7 @@ class InternalPigeonOptions {
     required this.gobjectOptions,
     required this.dartOptions,
     this.cppFfiOptions,
+    this.ffigenConfigOptions,
     this.copyrightHeader,
     this.astOut,
     this.debugGenerators,
@@ -139,6 +161,18 @@ class InternalPigeonOptions {
               options.dartOptions ?? DartOptions(ignoreLints: options.ignoreLints),
               dartOut: options.dartOut,
               testOut: options.dartTestOut,
+              fallbackFfiBindingImportPath: _getDartFfiBindingImportPath(options),
+              copyrightHeader: copyrightHeader,
+            ),
+      ffigenConfigOptions = options.dartFfiConfigOut == null
+          ? null
+          : InternalFfiGenConfigOptions(
+              configOut: options.dartFfiConfigOut!,
+              dartOut: options.dartFfiOut ?? '',
+              ffiHeaderPath: options.cppFfiHeaderOut ?? '',
+              bindingClassName:
+                  options.dartOptions?.ffiOptions?.bindingClassName ?? 'NativeLibrary',
+              description: 'Generated bindings for Pigeon C++ FFI APIs.',
               copyrightHeader: copyrightHeader,
               useJni: options.kotlinOptions?.useJni ?? false,
               useFfi: options.swiftOptions?.useFfi ?? false,
@@ -205,6 +239,9 @@ class InternalPigeonOptions {
 
   /// Options that control how C++ FFI adapter code will be generated.
   final InternalCppFfiOptions? cppFfiOptions;
+
+  /// Options that control how the ffigen config file will be generated.
+  final InternalFfiGenConfigOptions? ffigenConfigOptions;
 
   /// Options that control how GObject source will be generated.
   final InternalGObjectOptions? gobjectOptions;
@@ -738,6 +775,45 @@ class CppFfiGeneratorAdapter implements GeneratorAdapter {
       return <Error>[];
     }
     return validateCppFfi(options.cppFfiOptions!, root);
+  }
+}
+
+/// A [GeneratorAdapter] that generates an ffigen config file.
+class FfiGenConfigGeneratorAdapter implements GeneratorAdapter {
+  /// Constructor for [FfiGenConfigGeneratorAdapter].
+  const FfiGenConfigGeneratorAdapter();
+
+  /// A string representing the name of the generated config.
+  static const String languageString = 'ffigen config';
+
+  @override
+  List<FileType> get fileTypeList => const <FileType>[FileType.na];
+
+  @override
+  void generate(StringSink sink, InternalPigeonOptions options, Root root, FileType fileType) {
+    if (options.ffigenConfigOptions == null) {
+      return;
+    }
+
+    const generator = FfiGenConfigGenerator();
+    generator.generate(
+      options.ffigenConfigOptions!,
+      root,
+      sink,
+      dartPackageName: options.dartPackageName,
+    );
+  }
+
+  @override
+  IOSink? shouldGenerate(InternalPigeonOptions options, FileType fileType) =>
+      _openSink(options.ffigenConfigOptions?.configOut, basePath: options.basePath ?? '');
+
+  @override
+  List<Error> validate(InternalPigeonOptions options, Root root) {
+    if (options.ffigenConfigOptions == null) {
+      return <Error>[];
+    }
+    return validateFfiGenConfig(options.ffigenConfigOptions!, root);
   }
 }
 
