@@ -302,6 +302,7 @@ Dart opens with FFI.
 Configure both the regular C++ generator and the C++ FFI generator. The regular
 C++ files provide the typed HostApi interface and codec helpers; the FFI files
 provide exported C ABI functions that ffigen can read.
+`cppFfiHeaderOut` and `cppFfiSourceOut` must be configured together.
 
 ```dart
 import 'package:pigeon/pigeon.dart';
@@ -350,10 +351,10 @@ Run Pigeon from the package root:
 dart run pigeon --input pigeons/messages.dart
 ```
 
-When `dartFfiOut` and `cppFfiHeaderOut` are set, Pigeon will generate the
-ffigen config file and then run ffigen automatically. By default, the config
-file is written under `tool/pigeon`. You can change that directory with
-`configDirectory` or `--config_dir`.
+When `dartFfiOut`, `cppFfiHeaderOut`, and `cppFfiSourceOut` are set, Pigeon
+will generate the ffigen config file and then run ffigen automatically. By
+default, the config file is written under `tool/pigeon`. You can change that
+directory with `configDirectory` or `--config_dir`.
 For example, `pigeons/messages.dart` produces
 `tool/pigeon/messages_ffigen_config.yaml`.
 Running from the package root lets `dart run ffigen` resolve the package's

@@ -995,6 +995,19 @@ ${_argParser.usage}''';
       );
     }
 
+    errors.addAll(validatePigeonOptions(options));
+    if (errors.isNotEmpty) {
+      printErrors(
+        errors
+            .map(
+              (Error err) =>
+                  Error(message: err.message, filename: options.input, lineNumber: err.lineNumber),
+            )
+            .toList(),
+      );
+      return 1;
+    }
+
     final InternalPigeonOptions internalOptions = InternalPigeonOptions.fromPigeonOptions(options);
 
     for (final adapter in safeGeneratorAdapters) {

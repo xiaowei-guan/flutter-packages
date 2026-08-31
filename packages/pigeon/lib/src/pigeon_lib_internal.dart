@@ -92,6 +92,63 @@ InternalFfiGenConfigOptions? _getFfiGenConfigOptions(
   );
 }
 
+/// Validates option combinations that span multiple generators.
+List<Error> validatePigeonOptions(PigeonOptions options) {
+  final errors = <Error>[];
+  final dartOutputPath = options.dartOut ?? options.dartOptions?.sourceOutPath;
+  final dartFfiOptions = options.dartOptions?.ffiOptions;
+  if (dartFfiOptions != null && dartOutputPath == null) {
+    errors.add(
+      Error(
+        message:
+            'Dart FFI requires dartOut or DartOptions.sourceOutPath '
+            'so the FFI wrapper can be generated',
+      ),
+    );
+  }
+
+  if (options.dartFfiConfigOut != null && options.dartFfiOut == null) {
+    errors.add(
+      Error(
+        message:
+            'dartFfiConfigOut requires dartFfiOut so ffigen knows where to '
+            'write the Dart FFI bindings',
+      ),
+    );
+  }
+
+  if (options.dartFfiConfigOut != null && options.cppFfiHeaderOut == null) {
+    errors.add(
+      Error(
+        message:
+            'dartFfiConfigOut requires cppFfiHeaderOut so ffigen knows which '
+            'C ABI header to read',
+      ),
+    );
+  } else if (options.dartFfiOut != null && options.cppFfiHeaderOut == null) {
+    errors.add(
+      Error(
+        message:
+            'dartFfiOut requires cppFfiHeaderOut so ffigen can read the '
+            'generated C ABI header',
+      ),
+    );
+  }
+
+  final hasCppFfiHeaderOut = options.cppFfiHeaderOut != null;
+  final hasCppFfiSourceOut = options.cppFfiSourceOut != null;
+  if (hasCppFfiHeaderOut != hasCppFfiSourceOut) {
+    errors.add(
+      Error(
+        message:
+            'C++ FFI generation requires both cppFfiHeaderOut and '
+            'cppFfiSourceOut',
+      ),
+    );
+  }
+  return errors;
+}
+
 String _normalizeDartPath(String path) => path.replaceAll(r'\', '/');
 
 /// Options used when running the code generator.
@@ -465,7 +522,13 @@ class DartGeneratorAdapter implements GeneratorAdapter {
 
     final errors = <Error>[];
     if (dartFfiOptions.bindingImportPath.isEmpty) {
-      errors.add(Error(message: 'Dart FFI requires a binding import path'));
+      errors.add(
+        Error(
+          message:
+              'Dart FFI requires dartFfiOut or DartFfiOptions.bindingImportPath '
+              'so the FFI wrapper can import the ffigen bindings',
+        ),
+      );
     }
     for (final AstHostApi api in root.apis.whereType<AstHostApi>()) {
       for (final Method method in api.methods) {
