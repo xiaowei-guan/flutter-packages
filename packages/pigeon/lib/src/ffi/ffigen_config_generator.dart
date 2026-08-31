@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import 'package:path/path.dart' as path;
+
 import '../ast.dart';
 import '../generator.dart';
 import '../generator_tools.dart';
@@ -56,17 +58,22 @@ class FfiGenConfigGenerator extends Generator<InternalFfiGenConfigOptions> {
     if (generatorOptions.copyrightHeader != null) {
       addLines(indent, generatorOptions.copyrightHeader!, linePrefix: '# ');
     }
+    final dartOut = _pathRelativeToConfig(generatorOptions.configOut, generatorOptions.dartOut);
+    final ffiHeaderPath = _pathRelativeToConfig(
+      generatorOptions.configOut,
+      generatorOptions.ffiHeaderPath,
+    );
     indent.writeln('# ${getGeneratedCodeWarning()}');
     indent.writeln('# $seeAlsoWarning');
     indent.newln();
     indent.writeln('name: ${_yamlQuote(generatorOptions.bindingClassName)}');
     indent.writeln('description: ${_yamlQuote(generatorOptions.description)}');
-    indent.writeln('output: ${_yamlQuote(_normalizePath(generatorOptions.dartOut))}');
+    indent.writeln('output: ${_yamlQuote(dartOut)}');
     indent.writeln('headers:');
     indent.nest(1, () {
       indent.writeln('entry-points:');
       indent.nest(1, () {
-        indent.writeln('- ${_yamlQuote(_normalizePath(generatorOptions.ffiHeaderPath))}');
+        indent.writeln('- ${_yamlQuote(ffiHeaderPath)}');
       });
       indent.writeln('include-directives:');
       indent.nest(1, () {
@@ -107,6 +114,23 @@ List<Error> validateFfiGenConfig(InternalFfiGenConfigOptions options, Root root)
 }
 
 String _normalizePath(String path) => path.replaceAll(r'\', '/');
+
+String _pathRelativeToConfig(String configOut, String targetPath) {
+  final normalizedTargetPath = _normalizePath(targetPath);
+  if (_isAbsolutePath(normalizedTargetPath)) {
+    return normalizedTargetPath;
+  }
+
+  final configDirectory = path.posix.dirname(_normalizePath(configOut));
+  if (configDirectory == '.' || configDirectory.isEmpty) {
+    return normalizedTargetPath;
+  }
+  return path.posix.relative(normalizedTargetPath, from: configDirectory);
+}
+
+bool _isAbsolutePath(String path) {
+  return path.startsWith('/') || RegExp(r'^[A-Za-z]:/').hasMatch(path);
+}
 
 String _fileName(String path) => _normalizePath(path).split('/').last;
 

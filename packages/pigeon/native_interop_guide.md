@@ -357,6 +357,8 @@ default, the config file is written under `tool/pigeon`. You can change that
 directory with `configDirectory` or `--config_dir`.
 For example, `pigeons/messages.dart` produces
 `tool/pigeon/messages_ffigen_config.yaml`.
+Paths inside that config are written relative to the config file, so the Dart
+FFI output may appear as `../../lib/src/messages.g.ffi.dart`.
 Running from the package root lets `dart run ffigen` resolve the package's
 `pubspec.yaml` and dev dependencies.
 

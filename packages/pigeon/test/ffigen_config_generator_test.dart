@@ -42,6 +42,29 @@ void main() {
     expect(code, contains("  - 'PigeonFfiBuffer'"));
   });
 
+  test('generates ffigen config paths relative to config file', () {
+    final root = Root(apis: <Api>[], classes: <Class>[], enums: <Enum>[]);
+    final sink = StringBuffer();
+    const generator = FfiGenConfigGenerator();
+
+    generator.generate(
+      const InternalFfiGenConfigOptions(
+        configOut: 'tool/pigeon/messages_ffigen_config.yaml',
+        dartOut: 'lib/src/messages.g.ffi.dart',
+        ffiHeaderPath: 'tizen/src/messages_ffi.h',
+        bindingClassName: 'MessagesFfiBindings',
+        description: 'Generated bindings for test.',
+      ),
+      root,
+      sink,
+      dartPackageName: _packageName,
+    );
+
+    final code = sink.toString();
+    expect(code, contains("output: '../../lib/src/messages.g.ffi.dart'"));
+    expect(code, contains("  - '../../tizen/src/messages_ffi.h'"));
+  });
+
   test('validates required paths', () {
     final root = Root(apis: <Api>[], classes: <Class>[], enums: <Enum>[]);
 
