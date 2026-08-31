@@ -198,6 +198,8 @@ void main() {
       'lib/messages.g.ffi.dart',
       '--dart_ffi_config_out',
       'ffigen.yaml',
+      '--config_dir',
+      'tool/pigeon',
       '--dart_ffi_binding_import',
       'messages.g.ffi.dart',
       '--dart_ffi_binding_class',
@@ -207,9 +209,17 @@ void main() {
     ]);
     expect(opts.dartFfiOut, equals('lib/messages.g.ffi.dart'));
     expect(opts.dartFfiConfigOut, equals('ffigen.yaml'));
+    expect(opts.configDirectory, equals('tool/pigeon'));
     expect(opts.dartOptions?.ffiOptions?.bindingImportPath, equals('messages.g.ffi.dart'));
     expect(opts.dartOptions?.ffiOptions?.bindingClassName, equals('MessagesFfiBindings'));
     expect(opts.dartOptions?.ffiOptions?.nativeLibraryExpression, equals('openLibrary()'));
+  });
+
+  test('PigeonOptions converts configDirectory to and from map', () {
+    const options = PigeonOptions(configDirectory: 'tool/pigeon');
+    final convertedOptions = PigeonOptions.fromMap(options.toMap());
+
+    expect(convertedOptions.configDirectory, equals('tool/pigeon'));
   });
 
   test('Dart FFI import path is inferred from dart_ffi_out', () {
@@ -222,6 +232,57 @@ void main() {
     );
 
     expect(options.dartOptions?.ffiOptions?.bindingImportPath, equals('messages.g.ffi.dart'));
+  });
+
+  test('ffigen config path is inferred from input path', () {
+    final options = InternalPigeonOptions.fromPigeonOptions(
+      const PigeonOptions(
+        input: 'pigeons/messages.dart',
+        dartOut: 'lib/src/messages.g.dart',
+        dartFfiOut: 'lib/src/messages.g.ffi.dart',
+        cppFfiHeaderOut: 'tizen/messages_ffi.h',
+        dartPackageName: 'test_package',
+      ),
+    );
+
+    expect(
+      options.ffigenConfigOptions?.configOut,
+      equals('tool/pigeon/messages_ffigen_config.yaml'),
+    );
+  });
+
+  test('ffigen config path can use config_dir', () {
+    final options = InternalPigeonOptions.fromPigeonOptions(
+      const PigeonOptions(
+        input: 'pigeons/messages.dart',
+        configDirectory: 'tool/native_interop',
+        dartOut: 'lib/src/messages.g.dart',
+        dartFfiOut: 'lib/src/messages.g.ffi.dart',
+        cppFfiHeaderOut: 'tizen/messages_ffi.h',
+        dartPackageName: 'test_package',
+      ),
+    );
+
+    expect(
+      options.ffigenConfigOptions?.configOut,
+      equals('tool/native_interop/messages_ffigen_config.yaml'),
+    );
+  });
+
+  test('explicit ffigen config path overrides inferred path', () {
+    final options = InternalPigeonOptions.fromPigeonOptions(
+      const PigeonOptions(
+        input: 'pigeons/messages.dart',
+        configDirectory: 'tool/pigeon',
+        dartFfiConfigOut: 'ffigen.yaml',
+        dartOut: 'lib/src/messages.g.dart',
+        dartFfiOut: 'lib/src/messages.g.ffi.dart',
+        cppFfiHeaderOut: 'tizen/messages_ffi.h',
+        dartPackageName: 'test_package',
+      ),
+    );
+
+    expect(options.ffigenConfigOptions?.configOut, equals('ffigen.yaml'));
   });
 
   test('Dart FFI validation rejects async HostApi', () {
@@ -1730,6 +1791,21 @@ abstract class Api {
     await completer.future;
   });
 
+  test('@ConfigurePigeon PigeonOptions.configDirectory', () {
+    const code = '''
+@ConfigurePigeon(PigeonOptions(
+  configDirectory: 'tool/pigeon',
+))
+class Message {
+  int? id;
+}
+''';
+
+    final ParseResults results = parseSource(code);
+    final PigeonOptions options = PigeonOptions.fromMap(results.pigeonOptions!);
+    expect(options.configDirectory, 'tool/pigeon');
+  });
+
   test('return nullable', () {
     const code = '''
 @HostApi()
@@ -1853,7 +1929,12 @@ abstract class Api {
         String? workingDirectory,
       }) async {
         calls.add(_ProcessCall(executable, arguments, workingDirectory));
-        expect(File(path.join(workingDirectory!, 'ffigen.yaml')).existsSync(), isTrue);
+        expect(
+          File(
+            path.join(workingDirectory!, 'tool', 'pigeon', 'foo_ffigen_config.yaml'),
+          ).existsSync(),
+          isTrue,
+        );
         return ProcessResult(123, 0, '', '');
       }
 
@@ -1863,7 +1944,7 @@ abstract class Api {
           basePath: dir.path,
           dartOut: 'lib/messages.g.dart',
           dartFfiOut: 'lib/messages.g.ffi.dart',
-          dartFfiConfigOut: 'ffigen.yaml',
+          configDirectory: 'tool/pigeon',
           dartOptions: const DartOptions(ffiOptions: DartFfiOptions()),
           cppHeaderOut: 'tizen/messages.h',
           cppSourceOut: 'tizen/messages.cc',
@@ -1877,7 +1958,10 @@ abstract class Api {
       expect(result, equals(0));
       expect(calls, hasLength(1));
       expect(calls.single.executable, equals(Platform.resolvedExecutable));
-      expect(calls.single.arguments, equals(<String>['run', 'ffigen', '--config', 'ffigen.yaml']));
+      expect(
+        calls.single.arguments,
+        equals(<String>['run', 'ffigen', '--config', 'tool/pigeon/foo_ffigen_config.yaml']),
+      );
       expect(calls.single.workingDirectory, equals(dir.path));
     } finally {
       dir.deleteSync(recursive: true);

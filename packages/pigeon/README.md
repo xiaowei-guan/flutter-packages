@@ -9,6 +9,8 @@ It also improves efficiency over common method channel patterns. Most importantl
 it removes the need to write custom platform channel or native interop code, since Pigeon generates it for you.
 
 For usage examples, see the [Example README](./example/README.md).
+For native interop usage, see the
+[Native Interop Guide](./native_interop_guide.md).
 
 ## Features
 
@@ -18,6 +20,7 @@ Currently pigeon supports generating:
 * Kotlin and Java code for Android
 * Swift and Objective-C code for iOS and macOS
 * C++ code for Windows
+* Experimental C++ FFI adapter code for synchronous HostApi methods
 * GObject code for Linux
 
 ### Supported Datatypes

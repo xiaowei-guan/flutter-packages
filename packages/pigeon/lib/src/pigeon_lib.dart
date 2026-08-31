@@ -303,6 +303,8 @@ class PigeonOptions {
 
   /// Path to the ffigen config file that will be generated and used to run
   /// ffigen.
+  ///
+  /// Overrides the path inferred from [configDirectory].
   final String? dartFfiConfigOut;
 
   /// Path to the Dart file that will be generated for test support classes.
@@ -598,7 +600,7 @@ ${_argParser.usage}''';
       'dart_ffi_config_out',
       help:
           'Path to generated ffigen config file (.yaml). '
-          'If set, Pigeon runs ffigen.',
+          'Overrides config_dir inference.',
     )
     ..addOption(
       'dart_test_out',
@@ -1083,6 +1085,9 @@ ${_argParser.usage}''';
         if (!success) {
           return 1;
         }
+      }
+    }
+
     if (generatedFfiGenConfig) {
       final Error? ffigenError = await _runFfiGen(
         internalOptions,

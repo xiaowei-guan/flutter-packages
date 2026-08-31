@@ -56,7 +56,7 @@ class CppFfiOptions {
   /// Overrides any non-null parameters from [options] into this to make a new
   /// [CppFfiOptions].
   CppFfiOptions merge(CppFfiOptions options) {
-    return CppFfiOptions.fromMap(mergeMaps(toMap(), options.toMap()));
+    return CppFfiOptions.fromMap(mergePigeonMaps(toMap(), options.toMap()));
   }
 }
 
