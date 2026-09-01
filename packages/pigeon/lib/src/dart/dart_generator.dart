@@ -794,8 +794,8 @@ class DartGenerator extends StructuredGenerator<InternalDartOptions> {
     if (generatorOptions.useFfi) {
       indent.writeln("import 'dart:ffi';");
     }
-    if (usesNativeInterop(generatorOptions) || root.containsProxyApi) {
-      indent.writeln("import 'dart:io' show Platform;");
+    if (usesFfi || usesNativeInterop(generatorOptions) || root.containsProxyApi) {
+      indent.writeln("import 'dart:io' show File, Platform;");
     }
 
     final typedDataClasses = <String>[

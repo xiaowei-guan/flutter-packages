@@ -51,6 +51,7 @@ class CppOptions {
     this.namespace,
     this.copyrightHeader,
     this.headerOutPath,
+    this.useStdVisit,
   });
 
   /// The path to the header that will get placed in the source file (example:
@@ -66,6 +67,11 @@ class CppOptions {
   /// The path to the output header file location.
   final String? headerOutPath;
 
+  /// Whether to use std::visit when generating EncodableValue helper code.
+  ///
+  /// Defaults to true.
+  final bool? useStdVisit;
+
   /// Creates a [CppOptions] from a Map representation where:
   /// `x = CppOptions.fromMap(x.toMap())`.
   static CppOptions fromMap(Map<String, Object> map) {
@@ -74,6 +80,7 @@ class CppOptions {
       namespace: map['namespace'] as String?,
       copyrightHeader: map['copyrightHeader'] as Iterable<String>?,
       headerOutPath: map['cppHeaderOut'] as String?,
+      useStdVisit: map['useStdVisit'] as bool?,
     );
   }
 
@@ -84,6 +91,7 @@ class CppOptions {
       if (headerIncludePath != null) 'headerIncludePath': headerIncludePath!,
       if (namespace != null) 'namespace': namespace!,
       if (copyrightHeader != null) 'copyrightHeader': copyrightHeader!,
+      if (useStdVisit != null) 'useStdVisit': useStdVisit!,
     };
     return result;
   }
@@ -107,6 +115,7 @@ class InternalCppOptions extends InternalOptions {
     this.namespace,
     this.copyrightHeader,
     this.headerOutPath,
+    this.useStdVisit = true,
   });
 
   /// Creates InternalCppOptions from CppOptions.
@@ -118,7 +127,8 @@ class InternalCppOptions extends InternalOptions {
   }) : headerIncludePath = options.headerIncludePath ?? path.basename(cppHeaderOut),
        namespace = options.namespace,
        copyrightHeader = options.copyrightHeader ?? copyrightHeader,
-       headerOutPath = options.headerOutPath;
+       headerOutPath = options.headerOutPath,
+       useStdVisit = options.useStdVisit ?? true;
 
   /// The path to the header that will get placed in the source file (example:
   /// "foo.h").
@@ -138,6 +148,9 @@ class InternalCppOptions extends InternalOptions {
 
   /// The path to the output header file location.
   final String? headerOutPath;
+
+  /// Whether to use std::visit when generating EncodableValue helper code.
+  final bool useStdVisit;
 }
 
 /// Class that manages all Cpp code generation.
@@ -951,8 +964,8 @@ class CppSourceGenerator extends StructuredGenerator<InternalCppOptions> {
     );
     indent.writeln('namespace {');
     _writeDeepEquals(indent);
-    _writeDeepHash(indent);
-    _writeDeepToString(indent);
+    _writeDeepHash(indent, useStdVisit: generatorOptions.useStdVisit);
+    _writeDeepToString(indent, useStdVisit: generatorOptions.useStdVisit);
     indent.writeln('}  // namespace');
   }
 
@@ -1210,7 +1223,7 @@ bool PigeonInternalDeepEquals(const ::flutter::EncodableValue& a, const ::flutte
 ''');
   }
 
-  void _writeDeepHash(Indent indent) {
+  void _writeDeepHash(Indent indent, {required bool useStdVisit}) {
     indent.format('''
 template <typename T>
 size_t PigeonInternalDeepHash(const T& v);
@@ -1276,6 +1289,10 @@ size_t PigeonInternalDeepHash(const std::unique_ptr<T>& v) {
   return v ? PigeonInternalDeepHash(*v) : 0;
 }
 
+''');
+    indent.format(
+      useStdVisit
+          ? '''
 size_t PigeonInternalDeepHash(const ::flutter::EncodableValue& v) {
   size_t result = v.index();
   if (const double* dv = std::get_if<double>(&v)) {
@@ -1302,10 +1319,44 @@ size_t PigeonInternalDeepHash(const ::flutter::EncodableValue& v) {
   }
   return result;
 }
-''');
+'''
+          : '''
+size_t PigeonInternalDeepHash(const ::flutter::EncodableValue& v) {
+  size_t result = v.index();
+  if (const bool* bv = std::get_if<bool>(&v)) {
+    result = result * 31 + PigeonInternalDeepHash(*bv);
+  } else if (const int32_t* iv = std::get_if<int32_t>(&v)) {
+    result = result * 31 + PigeonInternalDeepHash(*iv);
+  } else if (const int64_t* lv = std::get_if<int64_t>(&v)) {
+    result = result * 31 + PigeonInternalDeepHash(*lv);
+  } else if (const double* dv = std::get_if<double>(&v)) {
+    result = result * 31 + PigeonInternalDeepHash(*dv);
+  } else if (const std::string* sv = std::get_if<std::string>(&v)) {
+    result = result * 31 + PigeonInternalDeepHash(*sv);
+  } else if (const std::vector<uint8_t>* bv = std::get_if<std::vector<uint8_t>>(&v)) {
+    result = result * 31 + PigeonInternalDeepHash(*bv);
+  } else if (const std::vector<int32_t>* iv = std::get_if<std::vector<int32_t>>(&v)) {
+    result = result * 31 + PigeonInternalDeepHash(*iv);
+  } else if (const std::vector<int64_t>* lv = std::get_if<std::vector<int64_t>>(&v)) {
+    result = result * 31 + PigeonInternalDeepHash(*lv);
+  } else if (const std::vector<float>* fv = std::get_if<std::vector<float>>(&v)) {
+    result = result * 31 + PigeonInternalDeepHash(*fv);
+  } else if (const std::vector<double>* dv = std::get_if<std::vector<double>>(&v)) {
+    result = result * 31 + PigeonInternalDeepHash(*dv);
+  } else if (const ::flutter::EncodableList* lv =
+                 std::get_if<::flutter::EncodableList>(&v)) {
+    result = result * 31 + PigeonInternalDeepHash(*lv);
+  } else if (const ::flutter::EncodableMap* mv =
+                 std::get_if<::flutter::EncodableMap>(&v)) {
+    result = result * 31 + PigeonInternalDeepHash(*mv);
+  }
+  return result;
+}
+''',
+    );
   }
 
-  void _writeDeepToString(Indent indent) {
+  void _writeDeepToString(Indent indent, {required bool useStdVisit}) {
     indent.format(r'''
 template <typename T>
 std::string PigeonInternalToString(const T& v);
@@ -1381,6 +1432,10 @@ std::string PigeonInternalToString(const std::unique_ptr<T>& v) {
   return v ? PigeonInternalToString(*v) : "null";
 }
 
+''');
+    indent.format(
+      useStdVisit
+          ? r'''
 std::string PigeonInternalToString(const ::flutter::EncodableValue& v) {
   return std::visit(
       [](const auto& val) {
@@ -1399,7 +1454,55 @@ std::string PigeonInternalToString(const ::flutter::EncodableValue& v) {
       },
       v);
 }
-''');
+'''
+          : r'''
+std::string PigeonInternalToString(const ::flutter::EncodableValue& v) {
+  if (std::get_if<std::monostate>(&v)) {
+    return "null";
+  }
+  if (const bool* bv = std::get_if<bool>(&v)) {
+    return PigeonInternalToString(*bv);
+  }
+  if (const int32_t* iv = std::get_if<int32_t>(&v)) {
+    return PigeonInternalToString(*iv);
+  }
+  if (const int64_t* lv = std::get_if<int64_t>(&v)) {
+    return PigeonInternalToString(*lv);
+  }
+  if (const double* dv = std::get_if<double>(&v)) {
+    return PigeonInternalToString(*dv);
+  }
+  if (const std::string* sv = std::get_if<std::string>(&v)) {
+    return "\"" + *sv + "\"";
+  }
+  if (const std::vector<uint8_t>* bv = std::get_if<std::vector<uint8_t>>(&v)) {
+    return PigeonInternalToString(*bv);
+  }
+  if (const std::vector<int32_t>* iv = std::get_if<std::vector<int32_t>>(&v)) {
+    return PigeonInternalToString(*iv);
+  }
+  if (const std::vector<int64_t>* lv = std::get_if<std::vector<int64_t>>(&v)) {
+    return PigeonInternalToString(*lv);
+  }
+  if (const std::vector<float>* fv = std::get_if<std::vector<float>>(&v)) {
+    return PigeonInternalToString(*fv);
+  }
+  if (const std::vector<double>* dv = std::get_if<std::vector<double>>(&v)) {
+    return PigeonInternalToString(*dv);
+  }
+  if (const ::flutter::EncodableList* lv = std::get_if<::flutter::EncodableList>(&v)) {
+    return PigeonInternalToString(*lv);
+  }
+  if (const ::flutter::EncodableMap* mv = std::get_if<::flutter::EncodableMap>(&v)) {
+    return PigeonInternalToString(*mv);
+  }
+  if (std::get_if<::flutter::CustomEncodableValue>(&v)) {
+    return "[custom]";
+  }
+  return "";
+}
+''',
+    );
   }
 
   @override

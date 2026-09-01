@@ -80,10 +80,11 @@ class InternalCppFfiOptions extends InternalOptions {
     required this.cppFfiHeaderOut,
     required this.cppFfiSourceOut,
     required String fallbackApiHeaderIncludePath,
+    String? fallbackNamespace,
     Iterable<String>? copyrightHeader,
   }) : headerIncludePath = options.headerIncludePath ?? path.basename(cppFfiHeaderOut),
        apiHeaderIncludePath = options.apiHeaderIncludePath ?? fallbackApiHeaderIncludePath,
-       namespace = options.namespace,
+       namespace = options.namespace ?? fallbackNamespace,
        copyrightHeader = options.copyrightHeader ?? copyrightHeader;
 
   /// The generated FFI header include path used by the generated FFI source.
@@ -410,9 +411,8 @@ void _writeReturnEncoding(
       ? '::flutter::EncodableValue'
       : '::flutter::CustomEncodableValue';
   if (dartReturnType.isNullable) {
-    indent.writeln('auto output_optional = std::move(output).TakeValue();');
-    indent.writeScoped('if (output_optional) {', '} else {', () {
-      final encodedValue = '$wrapperType(std::move(output_optional).value())';
+    indent.writeScoped('if (output.value()) {', '} else {', () {
+      final encodedValue = '$wrapperType(output.value().value())';
       indent.writeln(
         'return PigeonFfiEncodeMessage(codec, '
         '::flutter::EncodableValue(::flutter::EncodableList{$encodedValue}));',
@@ -426,7 +426,7 @@ void _writeReturnEncoding(
   indent.writeln(
     'return PigeonFfiEncodeMessage(codec, '
     '::flutter::EncodableValue(::flutter::EncodableList{'
-    '$wrapperType(std::move(output).TakeValue())}));',
+    '$wrapperType(output.value())}));',
   );
 }
 

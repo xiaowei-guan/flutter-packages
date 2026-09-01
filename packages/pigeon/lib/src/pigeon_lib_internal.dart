@@ -244,6 +244,7 @@ class InternalPigeonOptions {
               fallbackApiHeaderIncludePath:
                   options.cppOptions?.headerIncludePath ??
                   (options.cppHeaderOut == null ? '' : path.basename(options.cppHeaderOut!)),
+              fallbackNamespace: options.cppOptions?.namespace,
               copyrightHeader: copyrightHeader,
             ),
       gobjectOptions = options.gobjectHeaderOut == null || options.gobjectSourceOut == null

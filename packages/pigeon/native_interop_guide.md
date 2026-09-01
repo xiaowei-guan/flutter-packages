@@ -323,7 +323,6 @@ import 'package:pigeon/pigeon.dart';
     cppOptions: CppOptions(namespace: 'my_plugin'),
     cppFfiHeaderOut: 'tizen/messages_ffi.h',
     cppFfiSourceOut: 'tizen/messages_ffi.cc',
-    cppFfiOptions: CppFfiOptions(namespace: 'my_plugin'),
     dartPackageName: 'my_plugin',
   ),
 )
@@ -340,8 +339,22 @@ name alone, set `cppFfiOptions.apiHeaderIncludePath` explicitly:
 
 ```dart
 cppFfiOptions: CppFfiOptions(
-  namespace: 'my_plugin',
   apiHeaderIncludePath: 'path/visible/to/messages.h',
+),
+```
+
+The C++ FFI adapter uses `cppOptions.namespace` by default so that
+`SetUpMyApiFfi` and the generated C++ API classes live in the same namespace.
+Set `cppFfiOptions.namespace` only if the FFI adapter must use a different
+namespace from the regular generated C++ API.
+
+If the target C++ toolchain cannot compile `std::visit` with
+`flutter::EncodableValue`, disable it for the regular C++ generator:
+
+```dart
+cppOptions: CppOptions(
+  namespace: 'my_plugin',
+  useStdVisit: false,
 ),
 ```
 

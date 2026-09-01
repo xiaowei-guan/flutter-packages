@@ -424,6 +424,46 @@ void main() {
     }
   });
 
+  test('EncodableValue helpers use std::visit by default', () {
+    final root = Root(apis: <Api>[], classes: <Class>[], enums: <Enum>[]);
+    final sink = StringBuffer();
+    const generator = CppGenerator();
+    final generatorOptions = OutputFileOptions<InternalCppOptions>(
+      fileType: FileType.source,
+      languageOptions: const InternalCppOptions(
+        cppHeaderOut: '',
+        cppSourceOut: '',
+        headerIncludePath: '',
+      ),
+    );
+    generator.generate(generatorOptions, root, sink, dartPackageName: DEFAULT_PACKAGE_NAME);
+    final code = sink.toString();
+
+    expect(code, contains('std::visit('));
+  });
+
+  test('EncodableValue helpers can avoid std::visit', () {
+    final root = Root(apis: <Api>[], classes: <Class>[], enums: <Enum>[]);
+    final sink = StringBuffer();
+    const generator = CppGenerator();
+    final generatorOptions = OutputFileOptions<InternalCppOptions>(
+      fileType: FileType.source,
+      languageOptions: const InternalCppOptions(
+        cppHeaderOut: '',
+        cppSourceOut: '',
+        headerIncludePath: '',
+        useStdVisit: false,
+      ),
+    );
+    generator.generate(generatorOptions, root, sink, dartPackageName: DEFAULT_PACKAGE_NAME);
+    final code = sink.toString();
+
+    expect(code, isNot(contains('std::visit(')));
+    expect(code, contains('std::get_if<bool>(&v)'));
+    expect(code, contains('std::get_if<std::string>(&v)'));
+    expect(code, contains('std::get_if<::flutter::CustomEncodableValue>(&v)'));
+  });
+
   test('include blocks follow style', () {
     final root = Root(
       apis: <Api>[

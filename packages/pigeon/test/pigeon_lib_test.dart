@@ -7,6 +7,8 @@ import 'dart:io';
 
 import 'package:path/path.dart' as path;
 import 'package:pigeon/src/ast.dart';
+import 'package:pigeon/src/cpp/cpp_ffi_generator.dart' show CppFfiOptions;
+import 'package:pigeon/src/cpp/cpp_generator.dart' show CppOptions;
 import 'package:pigeon/src/dart/dart_generator.dart';
 import 'package:pigeon/src/generator_tools.dart';
 import 'package:pigeon/src/kotlin/jnigen_config_generator.dart';
@@ -178,6 +180,11 @@ void main() {
     expect(opts.cppSourceOut, equals('foo.cpp'));
   });
 
+  test('parse args - no cpp_use_std_visit', () {
+    final PigeonOptions opts = Pigeon.parseArgs(<String>['--no-cpp_use_std_visit']);
+    expect(opts.cppOptions?.useStdVisit, isFalse);
+  });
+
   test('parse args - cpp_ffi outputs', () {
     final PigeonOptions opts = Pigeon.parseArgs(<String>[
       '--cpp_ffi_header_out',
@@ -222,6 +229,13 @@ void main() {
     expect(convertedOptions.configDirectory, equals('tool/pigeon'));
   });
 
+  test('PigeonOptions converts CppOptions.useStdVisit to and from map', () {
+    const options = PigeonOptions(cppOptions: CppOptions(useStdVisit: false));
+    final convertedOptions = PigeonOptions.fromMap(options.toMap());
+
+    expect(convertedOptions.cppOptions?.useStdVisit, isFalse);
+  });
+
   test('Dart FFI import path is inferred from dart_ffi_out', () {
     final options = InternalPigeonOptions.fromPigeonOptions(
       const PigeonOptions(
@@ -232,6 +246,35 @@ void main() {
     );
 
     expect(options.dartOptions?.ffiOptions?.bindingImportPath, equals('messages.g.ffi.dart'));
+  });
+
+  test('C++ FFI namespace is inferred from C++ namespace', () {
+    final options = InternalPigeonOptions.fromPigeonOptions(
+      const PigeonOptions(
+        cppHeaderOut: 'tizen/messages.h',
+        cppSourceOut: 'tizen/messages.cc',
+        cppOptions: CppOptions(namespace: 'my_plugin'),
+        cppFfiHeaderOut: 'tizen/messages_ffi.h',
+        cppFfiSourceOut: 'tizen/messages_ffi.cc',
+      ),
+    );
+
+    expect(options.cppFfiOptions?.namespace, equals('my_plugin'));
+  });
+
+  test('C++ FFI namespace overrides inferred C++ namespace', () {
+    final options = InternalPigeonOptions.fromPigeonOptions(
+      const PigeonOptions(
+        cppHeaderOut: 'tizen/messages.h',
+        cppSourceOut: 'tizen/messages.cc',
+        cppOptions: CppOptions(namespace: 'my_plugin'),
+        cppFfiHeaderOut: 'tizen/messages_ffi.h',
+        cppFfiSourceOut: 'tizen/messages_ffi.cc',
+        cppFfiOptions: CppFfiOptions(namespace: 'my_plugin_ffi'),
+      ),
+    );
+
+    expect(options.cppFfiOptions?.namespace, equals('my_plugin_ffi'));
   });
 
   test('ffigen config path is inferred from input path', () {
@@ -1767,6 +1810,21 @@ class Message {
     expect(options.cppOptions?.headerIncludePath, 'Header.path');
   });
 
+  test('@ConfigurePigeon CppOptions.useStdVisit', () {
+    const code = '''
+@ConfigurePigeon(PigeonOptions(
+  cppOptions: CppOptions(useStdVisit: false),
+))
+class Message {
+  int? id;
+}
+''';
+
+    final ParseResults results = parseSource(code);
+    final PigeonOptions options = PigeonOptions.fromMap(results.pigeonOptions!);
+    expect(options.cppOptions?.useStdVisit, isFalse);
+  });
+
   test('@ConfigurePigeon swiftOut single', () {
     const code = '''
 @ConfigurePigeon(PigeonOptions(
@@ -2122,6 +2180,7 @@ abstract class Api {
           ),
           cppHeaderOut: 'tizen/messages.h',
           cppSourceOut: 'tizen/messages.cc',
+          cppOptions: const CppOptions(namespace: 'test_plugin'),
           cppFfiHeaderOut: 'tizen/messages_ffi.h',
           cppFfiSourceOut: 'tizen/messages_ffi.cc',
           dartPackageName: 'test_plugin',
@@ -2166,10 +2225,15 @@ abstract class Api {
       expect(dartCode, contains('MessagesFfiBindings'));
       expect(dartFfiCode, contains('fake ffigen'));
       expect(cppHeaderCode, contains('class Api'));
+      expect(cppHeaderCode, contains('namespace test_plugin {'));
       expect(cppSourceCode, contains('Api::GetCodec'));
       expect(cppFfiHeaderCode, contains('PigeonFfiBuffer'));
       expect(cppFfiHeaderCode, contains('pigeon_api_add'));
+      expect(cppFfiHeaderCode, contains('namespace test_plugin {'));
       expect(cppFfiSourceCode, contains('SetUpApiFfi'));
+      expect(cppFfiSourceCode, contains('namespace test_plugin {'));
+      expect(cppFfiSourceCode, contains('return test_plugin::PigeonApiAddFfi(request);'));
+      expect(cppFfiSourceCode, isNot(contains('TakeValue()')));
       expect(ffigenConfigCode, contains("output: '../../lib/messages.g.ffi.dart'"));
       expect(ffigenConfigCode, contains("- '../../tizen/messages_ffi.h'"));
     } finally {

@@ -226,6 +226,7 @@ void main() {
     );
     final code = sink.toString();
     expect(code, contains("import 'dart:ffi' as ffi;"));
+    expect(code, contains("import 'dart:io' show File, Platform;"));
     expect(code, contains("import 'package:ffi/ffi.dart' as pkg_ffi;"));
     expect(code, contains("import 'messages.g.ffi.dart' as pigeon_ffi;"));
     expect(code, contains('pigeon_ffi.MessagesFfiBindings? ffiBindings'));

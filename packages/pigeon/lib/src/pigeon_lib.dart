@@ -701,6 +701,11 @@ ${_argParser.usage}''';
       aliases: const <String>['experimental_cpp_source_out'],
     )
     ..addOption('cpp_namespace', help: 'The namespace that generated C++ code will be in.')
+    ..addFlag(
+      'cpp_use_std_visit',
+      help: 'Use std::visit when generating C++ EncodableValue helper code.',
+      defaultsTo: true,
+    )
     ..addOption('cpp_ffi_header_out', help: 'Path to generated C++ FFI C ABI header file (.h).')
     ..addOption('cpp_ffi_source_out', help: 'Path to generated C++ FFI adapter source file (.cpp).')
     ..addOption(
@@ -785,6 +790,9 @@ ${_argParser.usage}''';
         dartFfiBindingClass != null ||
         dartFfiNativeLibrary != null;
 
+    final bool? cppUseStdVisit = results.wasParsed('cpp_use_std_visit')
+        ? results['cpp_use_std_visit'] as bool
+        : null;
     final opts = PigeonOptions(
       input: results['input'] as String?,
       appDirectory: results['app_directory'] as String?,
@@ -849,6 +857,7 @@ ${_argParser.usage}''';
         namespace: results['cpp_namespace'] as String?,
         headerIncludePath: results['cpp_header_include_path'] as String?,
         headerOutPath: results['cpp_header_out_path'] as String?,
+        useStdVisit: cppUseStdVisit,
       ),
       cppFfiHeaderOut: results['cpp_ffi_header_out'] as String?,
       cppFfiSourceOut: results['cpp_ffi_source_out'] as String?,

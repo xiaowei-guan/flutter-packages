@@ -117,6 +117,7 @@ void main() {
 
     final code = sink.toString();
     expect(code, contains('#include "messages_ffi.h"'));
+    expect(code, contains('namespace test {'));
     expect(code, contains('CalculatorApi* g_calculator_api_api = nullptr;'));
     expect(code, contains('void SetUpCalculatorApiFfi(CalculatorApi* api)'));
     expect(
@@ -125,11 +126,15 @@ void main() {
     );
     expect(code, contains('const int64_t x_arg = encodable_x_arg.LongValue();'));
     expect(code, contains('ErrorOr<int64_t> output = g_calculator_api_api->Add(x_arg, y_arg);'));
+    expect(code, contains('::flutter::EncodableValue(output.value())'));
     expect(code, contains('return PigeonFfiEncodeMessage'));
+    expect(code, isNot(contains('TakeValue()')));
+    expect(code, contains('}  // namespace test'));
     expect(
       code,
       contains('extern "C" PigeonFfiBuffer* pigeon_calculator_api_add(PigeonFfiBuffer* request)'),
     );
+    expect(code, contains('return test::PigeonCalculatorApiAddFfi(request);'));
     expect(code, isNot(contains('TODO')));
   });
 
