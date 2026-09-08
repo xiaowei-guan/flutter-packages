@@ -271,6 +271,7 @@ Dart caller
   -> messages.g.dart
   -> messages.g.ffi.dart
   -> messages_ffi.cc
+  -> optional PigeonFfiSyncDispatcher
   -> hand-written C++ HostApi implementation
 ```
 
@@ -437,6 +438,37 @@ void RegisterVideoPlayerApiFfi(VideoPlayerApiImpl* api) {
 
 }  // namespace my_plugin
 ```
+
+If a HostApi method touches platform-thread-only APIs, such as a
+`BinaryMessenger`, event channel, texture registrar, or platform media APIs,
+pass a dispatcher when setting up the FFI API:
+
+```cpp
+namespace my_plugin {
+
+class PlatformThreadDispatcher : public PigeonFfiSyncDispatcher {
+ public:
+  ::PigeonFfiBuffer* RunSync(
+      std::function<::PigeonFfiBuffer*()> task) override {
+    // If already on the platform thread, run task immediately. Otherwise post
+    // it to the platform thread and block until it returns.
+    return task();
+  }
+};
+
+void RegisterVideoPlayerApiFfi(
+    VideoPlayerApiImpl* api,
+    PlatformThreadDispatcher* dispatcher) {
+  SetUpVideoPlayerApiFfi(api, dispatcher);
+}
+
+}  // namespace my_plugin
+```
+
+`RunSync` must complete synchronously before returning to Dart. Implementations
+should avoid deadlocks by running the task inline when already on the platform
+thread. The `api` and `dispatcher` pointers passed to `SetUpVideoPlayerApiFfi`
+must remain valid for as long as Dart can make FFI calls.
 
 Make sure both `messages.cc` and `messages_ffi.cc` are included in the native
 build.

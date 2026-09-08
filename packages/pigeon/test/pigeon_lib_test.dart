@@ -2230,9 +2230,11 @@ abstract class Api {
       expect(cppFfiHeaderCode, contains('PigeonFfiBuffer'));
       expect(cppFfiHeaderCode, contains('pigeon_api_add'));
       expect(cppFfiHeaderCode, contains('namespace test_plugin {'));
+      expect(cppFfiHeaderCode, contains('class PigeonFfiSyncDispatcher'));
       expect(cppFfiSourceCode, contains('SetUpApiFfi'));
       expect(cppFfiSourceCode, contains('namespace test_plugin {'));
-      expect(cppFfiSourceCode, contains('return test_plugin::PigeonApiAddFfi(request);'));
+      expect(cppFfiSourceCode, contains('PigeonFfiSyncDispatcher* g_api_dispatcher = nullptr;'));
+      expect(cppFfiSourceCode, contains('return test_plugin::PigeonApiAddFfiDispatch(request);'));
       expect(cppFfiSourceCode, isNot(contains('TakeValue()')));
       expect(ffigenConfigCode, contains("output: '../../lib/messages.g.ffi.dart'"));
       expect(ffigenConfigCode, contains("- '../../tizen/messages_ffi.h'"));

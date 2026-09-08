@@ -152,6 +152,7 @@ void _writeHeader(InternalCppFfiOptions options, Root root, Indent indent) {
   indent.writeln('#include <stdint.h>');
   indent.newln();
   indent.writeln('#ifdef __cplusplus');
+  indent.writeln('#include <functional>');
   indent.writeln('#include "${options.apiHeaderIncludePath}"');
   indent.writeln('#endif');
   indent.newln();
@@ -197,9 +198,27 @@ typedef struct PigeonFfiBuffer {
 }
 
 void _writeCppSetUpDeclarations(InternalCppFfiOptions options, Root root, Indent indent) {
+  final List<AstHostApi> hostApis = root.apis.whereType<AstHostApi>().toList();
+  if (hostApis.isEmpty) {
+    return;
+  }
+
   void writeDeclarations() {
-    for (final AstHostApi api in root.apis.whereType<AstHostApi>()) {
-      indent.writeln('void SetUp${api.name}Ffi(${api.name}* api);');
+    indent.format(r'''
+class PigeonFfiSyncDispatcher {
+ public:
+  virtual ~PigeonFfiSyncDispatcher() = default;
+  virtual ::PigeonFfiBuffer* RunSync(
+      std::function<::PigeonFfiBuffer*()> task) = 0;
+};
+
+''');
+    for (final AstHostApi api in hostApis) {
+      indent.writeln('void SetUp${api.name}Ffi(');
+      indent.nest(1, () {
+        indent.writeln('${api.name}* api,');
+        indent.writeln('PigeonFfiSyncDispatcher* dispatcher = nullptr);');
+      });
     }
   }
 
@@ -275,8 +294,8 @@ void pigeon_free_buffer(PigeonFfiBuffer* buffer) {
   for (final AstHostApi api in root.apis.whereType<AstHostApi>()) {
     for (final Method method in api.methods) {
       final String qualifiedHelper = options.namespace == null
-          ? _ffiHelperName(api, method)
-          : '${options.namespace}::${_ffiHelperName(api, method)}';
+          ? _ffiDispatchHelperName(api, method)
+          : '${options.namespace}::${_ffiDispatchHelperName(api, method)}';
       indent.writeln(
         'extern "C" PigeonFfiBuffer* ${_ffiFunctionName(api, method)}(PigeonFfiBuffer* request) {',
       );
@@ -294,18 +313,41 @@ void _writeApiSource(Indent indent, AstHostApi api) {
   indent.writeln('namespace {');
   indent.nest(1, () {
     indent.writeln('${api.name}* ${_apiVariable(api)} = nullptr;');
+    indent.writeln('PigeonFfiSyncDispatcher* ${_dispatcherVariable(api)} = nullptr;');
   });
   indent.writeln('}  // namespace');
   indent.newln();
-  indent.writeln('void SetUp${api.name}Ffi(${api.name}* api) {');
+  indent.writeln('void SetUp${api.name}Ffi(');
+  indent.nest(1, () {
+    indent.writeln('${api.name}* api,');
+    indent.writeln('PigeonFfiSyncDispatcher* dispatcher) {');
+  });
   indent.nest(1, () {
     indent.writeln('${_apiVariable(api)} = api;');
+    indent.writeln('${_dispatcherVariable(api)} = dispatcher;');
   });
   indent.writeln('}');
   indent.newln();
   for (final Method method in api.methods) {
     _writeMethodSource(indent, api, method);
+    _writeMethodDispatchSource(indent, api, method);
   }
+}
+
+void _writeMethodDispatchSource(Indent indent, AstHostApi api, Method method) {
+  indent.writeln(
+    'PigeonFfiBuffer* ${_ffiDispatchHelperName(api, method)}(PigeonFfiBuffer* request) {',
+  );
+  indent.nest(1, () {
+    indent.writeScoped('if (${_dispatcherVariable(api)} != nullptr) {', '}', () {
+      indent.writeScoped('return ${_dispatcherVariable(api)}->RunSync([request]() {', '});', () {
+        indent.writeln('return ${_ffiHelperName(api, method)}(request);');
+      });
+    });
+    indent.writeln('return ${_ffiHelperName(api, method)}(request);');
+  });
+  indent.writeln('}');
+  indent.newln();
 }
 
 void _writeMethodSource(Indent indent, AstHostApi api, Method method) {
@@ -572,7 +614,13 @@ String _ffiHelperName(AstHostApi api, Method method) {
   return 'Pigeon${api.name}${_methodName(method)}Ffi';
 }
 
+String _ffiDispatchHelperName(AstHostApi api, Method method) {
+  return '${_ffiHelperName(api, method)}Dispatch';
+}
+
 String _apiVariable(AstHostApi api) => 'g_${_snakeCase(api.name)}_api';
+
+String _dispatcherVariable(AstHostApi api) => 'g_${_snakeCase(api.name)}_dispatcher';
 
 String _snakeCase(String name) {
   return name.replaceAllMapped(

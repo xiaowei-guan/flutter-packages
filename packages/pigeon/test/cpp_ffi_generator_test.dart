@@ -66,8 +66,13 @@ void main() {
       ),
     );
     expect(code, contains('#include "messages.h"'));
+    expect(code, contains('#include <functional>'));
     expect(code, contains('namespace test {'));
-    expect(code, contains('void SetUpCalculatorApiFfi(CalculatorApi* api);'));
+    expect(code, contains('class PigeonFfiSyncDispatcher'));
+    expect(code, contains('virtual ::PigeonFfiBuffer* RunSync'));
+    expect(code, contains('void SetUpCalculatorApiFfi('));
+    expect(code, contains('CalculatorApi* api,'));
+    expect(code, contains('PigeonFfiSyncDispatcher* dispatcher = nullptr);'));
   });
 
   test('generates C++ source dispatch for sync HostApi', () {
@@ -119,7 +124,10 @@ void main() {
     expect(code, contains('#include "messages_ffi.h"'));
     expect(code, contains('namespace test {'));
     expect(code, contains('CalculatorApi* g_calculator_api_api = nullptr;'));
-    expect(code, contains('void SetUpCalculatorApiFfi(CalculatorApi* api)'));
+    expect(code, contains('PigeonFfiSyncDispatcher* g_calculator_api_dispatcher = nullptr;'));
+    expect(code, contains('void SetUpCalculatorApiFfi('));
+    expect(code, contains('PigeonFfiSyncDispatcher* dispatcher)'));
+    expect(code, contains('g_calculator_api_dispatcher = dispatcher;'));
     expect(
       code,
       contains('std::unique_ptr<::flutter::EncodableValue> message = codec.DecodeMessage'),
@@ -128,13 +136,17 @@ void main() {
     expect(code, contains('ErrorOr<int64_t> output = g_calculator_api_api->Add(x_arg, y_arg);'));
     expect(code, contains('::flutter::EncodableValue(output.value())'));
     expect(code, contains('return PigeonFfiEncodeMessage'));
+    expect(code, contains('PigeonCalculatorApiAddFfiDispatch(PigeonFfiBuffer* request)'));
+    expect(code, contains('if (g_calculator_api_dispatcher != nullptr)'));
+    expect(code, contains('return g_calculator_api_dispatcher->RunSync([request]() {'));
+    expect(code, contains('return PigeonCalculatorApiAddFfi(request);'));
     expect(code, isNot(contains('TakeValue()')));
     expect(code, contains('}  // namespace test'));
     expect(
       code,
       contains('extern "C" PigeonFfiBuffer* pigeon_calculator_api_add(PigeonFfiBuffer* request)'),
     );
-    expect(code, contains('return test::PigeonCalculatorApiAddFfi(request);'));
+    expect(code, contains('return test::PigeonCalculatorApiAddFfiDispatch(request);'));
     expect(code, isNot(contains('TODO')));
   });
 
