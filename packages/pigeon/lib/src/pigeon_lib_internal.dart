@@ -825,7 +825,9 @@ class CppGeneratorAdapter implements GeneratorAdapter {
   @override
   List<Error> validate(InternalPigeonOptions options, Root root) {
     final errors = <Error>[];
-    _errorOnEventChannelApi(errors, languageString, root);
+    if (options.cppFfiOptions == null) {
+      _errorOnEventChannelApi(errors, languageString, root);
+    }
     _errorOnSealedClass(errors, languageString, root);
     _errorOnInheritedClass(errors, languageString, root);
     return errors;

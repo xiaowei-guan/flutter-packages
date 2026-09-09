@@ -413,6 +413,57 @@ void main() {
     );
   });
 
+  test('C++ validation allows event channels when C++ FFI is configured', () {
+    final root = Root(
+      apis: <Api>[
+        AstEventChannelApi(
+          name: 'EventApi',
+          methods: <Method>[
+            Method(
+              name: 'streamEvents',
+              location: ApiLocation.host,
+              parameters: <Parameter>[],
+              returnType: const TypeDeclaration(baseName: 'int', isNullable: false),
+            ),
+          ],
+        ),
+      ],
+      classes: <Class>[],
+      enums: <Enum>[],
+      containsEventChannel: true,
+    );
+    const adapter = CppGeneratorAdapter();
+
+    final errorsWithoutFfi = adapter.validate(
+      InternalPigeonOptions.fromPigeonOptions(
+        const PigeonOptions(
+          cppHeaderOut: 'messages.h',
+          cppSourceOut: 'messages.cc',
+          cppOptions: CppOptions(),
+        ),
+      ),
+      root,
+    );
+    expect(
+      errorsWithoutFfi.map((Error error) => error.message),
+      contains('C++ does not support event channels'),
+    );
+
+    final errorsWithFfi = adapter.validate(
+      InternalPigeonOptions.fromPigeonOptions(
+        const PigeonOptions(
+          cppHeaderOut: 'messages.h',
+          cppSourceOut: 'messages.cc',
+          cppOptions: CppOptions(),
+          cppFfiHeaderOut: 'messages_ffi.h',
+          cppFfiSourceOut: 'messages_ffi.cc',
+        ),
+      ),
+      root,
+    );
+    expect(errorsWithFfi, isEmpty);
+  });
+
   test('Dart FFI validation rejects async HostApi', () {
     final root = Root(
       apis: <Api>[
@@ -2063,6 +2114,11 @@ abstract class Api {
 abstract class Api {
   int add(int x, int y);
 }
+
+@EventChannelApi()
+abstract class EventApi {
+  int streamEvents();
+}
 ''');
 
       final int result = await Pigeon.runWithOptions(
@@ -2090,6 +2146,11 @@ abstract class Api {
 @HostApi()
 abstract class Api {
   int add(int x, int y);
+}
+
+@EventChannelApi()
+abstract class EventApi {
+  int streamEvents();
 }
 ''');
       final calls = <_ProcessCall>[];
@@ -2147,6 +2208,11 @@ abstract class Api {
 @HostApi()
 abstract class Api {
   int add(int x, int y);
+}
+
+@EventChannelApi()
+abstract class EventApi {
+  int streamEvents();
 }
 ''');
       final calls = <_ProcessCall>[];
@@ -2223,18 +2289,31 @@ abstract class Api {
       final ffigenConfigCode = ffigenConfigFile.readAsStringSync();
 
       expect(dartCode, contains('MessagesFfiBindings'));
+      expect(dartCode, contains('Stream<int> streamEvents'));
+      expect(dartCode, contains('pigeon_event_api_stream_events_listen'));
       expect(dartFfiCode, contains('fake ffigen'));
       expect(cppHeaderCode, contains('class Api'));
       expect(cppHeaderCode, contains('namespace test_plugin {'));
       expect(cppSourceCode, contains('Api::GetCodec'));
       expect(cppFfiHeaderCode, contains('PigeonFfiBuffer'));
       expect(cppFfiHeaderCode, contains('pigeon_api_add'));
+      expect(cppFfiHeaderCode, contains('pigeon_event_api_stream_events_listen'));
       expect(cppFfiHeaderCode, contains('namespace test_plugin {'));
       expect(cppFfiHeaderCode, contains('class PigeonFfiSyncDispatcher'));
+      expect(cppFfiHeaderCode, contains('class PigeonEventApiStreamEventsStreamHandler'));
       expect(cppFfiSourceCode, contains('SetUpApiFfi'));
+      expect(cppFfiSourceCode, contains('SetUpEventApiStreamEventsFfi'));
       expect(cppFfiSourceCode, contains('namespace test_plugin {'));
       expect(cppFfiSourceCode, contains('PigeonFfiSyncDispatcher* g_api_dispatcher = nullptr;'));
+      expect(
+        cppFfiSourceCode,
+        contains('PigeonFfiSyncDispatcher* g_event_api_stream_events_dispatcher = nullptr;'),
+      );
       expect(cppFfiSourceCode, contains('return test_plugin::PigeonApiAddFfiDispatch(request);'));
+      expect(
+        cppFfiSourceCode,
+        contains('return test_plugin::PigeonEventApiStreamEventsListenFfiDispatch'),
+      );
       expect(cppFfiSourceCode, isNot(contains('TakeValue()')));
       expect(ffigenConfigCode, contains("output: '../../lib/messages.g.ffi.dart'"));
       expect(ffigenConfigCode, contains("- '../../tizen/messages_ffi.h'"));

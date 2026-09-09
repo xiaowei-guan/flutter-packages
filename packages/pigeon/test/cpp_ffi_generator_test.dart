@@ -150,6 +150,89 @@ void main() {
     expect(code, isNot(contains('TODO')));
   });
 
+  test('generates C ABI adapter for EventChannelApi', () {
+    final root = Root(
+      apis: <Api>[
+        AstEventChannelApi(
+          name: 'EventApi',
+          methods: <Method>[
+            Method(
+              name: 'streamEvents',
+              parameters: <Parameter>[],
+              location: ApiLocation.host,
+              returnType: const TypeDeclaration(baseName: 'int', isNullable: false),
+            ),
+          ],
+        ),
+      ],
+      classes: <Class>[],
+      enums: <Enum>[],
+      containsEventChannel: true,
+    );
+
+    final headerSink = StringBuffer();
+    const CppFfiGenerator().generate(
+      OutputFileOptions<InternalCppFfiOptions>(
+        fileType: FileType.header,
+        languageOptions: InternalCppFfiOptions(
+          headerIncludePath: 'messages_ffi.h',
+          apiHeaderIncludePath: 'messages.h',
+          cppFfiHeaderOut: 'messages_ffi.h',
+          cppFfiSourceOut: 'messages_ffi.cc',
+          namespace: 'test',
+        ),
+      ),
+      root,
+      headerSink,
+      dartPackageName: _packageName,
+    );
+
+    final headerCode = headerSink.toString();
+    expect(headerCode, contains('typedef void (*PigeonFfiEventCallback)'));
+    expect(headerCode, contains('pigeon_event_api_stream_events_listen'));
+    expect(headerCode, contains('pigeon_event_api_stream_events_cancel'));
+    expect(headerCode, contains('class PigeonEventApiStreamEventsEventSink'));
+    expect(headerCode, contains('class PigeonEventApiStreamEventsStreamHandler'));
+    expect(headerCode, contains('void SetUpEventApiStreamEventsFfi('));
+    expect(headerCode, contains('PigeonFfiSyncDispatcher* dispatcher = nullptr);'));
+
+    final sourceSink = StringBuffer();
+    const CppFfiGenerator().generate(
+      OutputFileOptions<InternalCppFfiOptions>(
+        fileType: FileType.source,
+        languageOptions: InternalCppFfiOptions(
+          headerIncludePath: 'messages_ffi.h',
+          apiHeaderIncludePath: 'messages.h',
+          cppFfiHeaderOut: 'messages_ffi.h',
+          cppFfiSourceOut: 'messages_ffi.cc',
+          namespace: 'test',
+        ),
+      ),
+      root,
+      sourceSink,
+      dartPackageName: _packageName,
+    );
+
+    final sourceCode = sourceSink.toString();
+    expect(sourceCode, contains('const ::flutter::StandardMessageCodec& PigeonFfiGetCodec()'));
+    expect(
+      sourceCode,
+      contains(
+        'PigeonEventApiStreamEventsStreamHandler* g_event_api_stream_events_handler = nullptr;',
+      ),
+    );
+    expect(
+      sourceCode,
+      contains('PigeonFfiSyncDispatcher* g_event_api_stream_events_dispatcher = nullptr;'),
+    );
+    expect(sourceCode, contains('class PigeonEventApiStreamEventsEventSinkImpl'));
+    expect(sourceCode, contains('handler->OnListen(instance_name, std::move(sink));'));
+    expect(sourceCode, contains('handler->OnCancel(instance_name);'));
+    expect(sourceCode, contains('return g_event_api_stream_events_dispatcher->RunSync([=]() {'));
+    expect(sourceCode, contains('return test::PigeonEventApiStreamEventsListenFfiDispatch'));
+    expect(sourceCode, contains('return test::PigeonEventApiStreamEventsCancelFfiDispatch'));
+  });
+
   test('validates unsupported api shapes', () {
     final root = Root(
       apis: <Api>[
@@ -166,9 +249,21 @@ void main() {
           ],
         ),
         AstFlutterApi(name: 'CallbackApi', methods: <Method>[]),
+        AstEventChannelApi(
+          name: 'EventApi',
+          methods: <Method>[
+            Method(
+              name: 'streamEvents',
+              parameters: <Parameter>[],
+              location: ApiLocation.host,
+              returnType: const TypeDeclaration(baseName: 'void', isNullable: false),
+            ),
+          ],
+        ),
       ],
       classes: <Class>[],
       enums: <Enum>[],
+      containsEventChannel: true,
     );
 
     final errors = validateCppFfi(
@@ -186,6 +281,7 @@ void main() {
       containsAll(<String>[
         'C++ FFI does not support async HostApi method "doIt"',
         'C++ FFI does not support FlutterApi "CallbackApi"',
+        'C++ FFI does not support void EventChannelApi method "streamEvents"',
       ]),
     );
   });

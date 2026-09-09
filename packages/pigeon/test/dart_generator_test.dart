@@ -119,6 +119,56 @@ void main() {
     );
   });
 
+  test('gen event channel api with FFI stream callbacks', () {
+    final api = AstEventChannelApi(
+      name: 'EventApi',
+      methods: <Method>[
+        Method(
+          name: 'streamEvents',
+          location: ApiLocation.host,
+          returnType: const TypeDeclaration(baseName: 'int', isNullable: false),
+          parameters: <Parameter>[],
+          documentationComments: <String>[' An example event stream.'],
+        ),
+      ],
+    );
+    final root = Root(
+      apis: <Api>[api],
+      classes: <Class>[],
+      enums: <Enum>[],
+      containsEventChannel: true,
+    );
+    final sink = StringBuffer();
+    const generator = DartGenerator();
+    generator.generate(
+      const InternalDartOptions(
+        ffiOptions: InternalDartFfiOptions(
+          bindingImportPath: 'messages.g.ffi.dart',
+          bindingClassName: 'MessagesFfiBindings',
+          nativeLibraryExpression: 'openLibrary()',
+        ),
+        ignoreLints: false,
+      ),
+      root,
+      sink,
+      dartPackageName: DEFAULT_PACKAGE_NAME,
+    );
+    final code = sink.toString();
+    expect(code, contains("import 'dart:ffi' as ffi;"));
+    expect(code, contains("import 'messages.g.ffi.dart' as pigeon_ffi;"));
+    expect(code, contains('Stream<int> streamEvents({String instanceName = \'\'}'));
+    expect(code, contains('StreamController<int>.broadcast'));
+    expect(code, contains('NativeCallable<_PigeonFfiEventCallbackNative>'));
+    expect(code, contains('pigeon_ffi.MessagesFfiBindings(openLibrary())'));
+    expect(code, contains('pigeon_event_api_stream_events_listen'));
+    expect(code, contains('pigeon_event_api_stream_events_cancel'));
+    expect(code, contains('_pigeonFfiOnEventCallback.nativeFunction'));
+    expect(code, contains('_pigeonFfiOnErrorCallback.nativeFunction'));
+    expect(code, contains('_pigeonFfiOnDoneCallback.nativeFunction'));
+    expect(code, isNot(contains('EventChannel(')));
+    expect(code, isNot(contains('receiveBroadcastStream')));
+  });
+
   test('gen one host api', () {
     final root = Root(
       apis: <Api>[

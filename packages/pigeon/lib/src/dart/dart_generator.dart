@@ -2228,6 +2228,11 @@ final $_pigeonFfiPrefix.${options.bindingClassName} $_pigeonFfiBindings;
     AstEventChannelApi api, {
     required String dartPackageName,
   }) {
+    if (generatorOptions.ffiOptions != null) {
+      _writeFfiEventChannelApi(indent, api);
+      return;
+    }
+
     indent.newln();
     addDocumentationComments(indent, api.documentationComments, docCommentSpec);
     for (final Method func in api.methods) {
@@ -2257,6 +2262,177 @@ final $_pigeonFfiPrefix.${options.bindingClassName} $_pigeonFfiBindings;
       }
     ''');
     }
+  }
+
+  void _writeFfiEventChannelApi(Indent indent, AstEventChannelApi api) {
+    indent.newln();
+    addDocumentationComments(indent, api.documentationComments, docCommentSpec);
+    for (final Method func in api.methods) {
+      addDocumentationComments(
+        indent,
+        func.documentationComments,
+        docCommentSpec,
+        generatorComments: <String>[
+          'Returns a broadcast [Stream] of events from the `${func.name}` FFI event stream.',
+          '',
+          'Each call to this method creates a new native FFI event sink, so it',
+          'should not be called multiple times for the same `instanceName`.',
+          'To deliver events to multiple listeners, call this method once and',
+          'listen to the returned broadcast stream multiple times instead.',
+        ],
+      );
+      _writeFfiEventChannelMethod(indent, api, func);
+    }
+  }
+
+  void _writeFfiEventChannelMethod(Indent indent, AstEventChannelApi api, Method method) {
+    final String streamType = addGenericTypes(method.returnType);
+    final String listenFunctionName = _eventListenFunctionName(api, method);
+    final String cancelFunctionName = _eventCancelFunctionName(api, method);
+    indent.writeln("Stream<$streamType> ${method.name}({String instanceName = ''}) {");
+    indent.nest(1, () {
+      indent.writeln('const MessageCodec<Object?> ${varNamePrefix}codec = $_pigeonMessageCodec();');
+      indent.writeln('int? ${varNamePrefix}activeSinkId;');
+      indent.writeln('late final StreamController<$streamType> ${varNamePrefix}controller;');
+      indent.writeln('${varNamePrefix}controller = StreamController<$streamType>.broadcast(');
+      indent.nest(1, () {
+        _writeFfiEventOnListen(indent, method, listenFunctionName, streamType);
+        _writeFfiEventOnCancel(indent, cancelFunctionName);
+      });
+      indent.writeln(');');
+      indent.writeln('return ${varNamePrefix}controller.stream;');
+    });
+    indent.writeln('}');
+    indent.newln();
+  }
+
+  void _writeFfiEventOnListen(
+    Indent indent,
+    Method method,
+    String listenFunctionName,
+    String streamType,
+  ) {
+    final String requestType = 'ffi.Pointer<$_pigeonFfiPrefix.PigeonFfiBuffer>';
+    indent.writeScoped('onListen: () {', '},', () {
+      indent.writeln('final int ${varNamePrefix}sinkId = _pigeonNextFfiEventSinkId++;');
+      indent.writeln('${varNamePrefix}activeSinkId = ${varNamePrefix}sinkId;');
+      indent.writeln("final String ${varNamePrefix}channelName = '$listenFunctionName';");
+      indent.writeln(
+        '_pigeonFfiEventControllers[${varNamePrefix}sinkId] = '
+        '_PigeonFfiEventControllerImpl<$streamType>(',
+      );
+      indent.nest(1, () {
+        indent.writeln('controller: ${varNamePrefix}controller,');
+        indent.writeln('codec: ${varNamePrefix}codec,');
+        indent.writeln('channelName: ${varNamePrefix}channelName,');
+        indent.writeScoped('decodeEvent: (Object? event) {', '},', () {
+          indent.writeln("return ${_castValue('event', method.returnType)};");
+        });
+      });
+      indent.writeln(');');
+      indent.writeln(
+        'final ByteData? ${varNamePrefix}requestMessage = '
+        '${varNamePrefix}codec.encodeMessage(<Object?>[instanceName]);',
+      );
+      indent.writeln(
+        'final $requestType ${varNamePrefix}request = '
+        '_encodeFfiRequest(${varNamePrefix}requestMessage);',
+      );
+      indent.writeln('$requestType ${varNamePrefix}response = ffi.nullptr;');
+      indent.writeln('try {');
+      indent.nest(1, () {
+        indent.writeln(
+          '${varNamePrefix}response = '
+          '$_defaultPigeonFfiBindings.$listenFunctionName(',
+        );
+        indent.nest(1, () {
+          indent.writeln('${varNamePrefix}request,');
+          indent.writeln('${varNamePrefix}sinkId,');
+          indent.writeln('_pigeonFfiOnEventCallback.nativeFunction,');
+          indent.writeln('_pigeonFfiOnErrorCallback.nativeFunction,');
+          indent.writeln('_pigeonFfiOnDoneCallback.nativeFunction,');
+        });
+        indent.writeln(');');
+        indent.writeln(
+          'final List<Object?>? ${varNamePrefix}replyList = '
+          '_decodeFfiReply(${varNamePrefix}codec, ${varNamePrefix}response);',
+        );
+        indent.writeln('_extractReplyValueOrThrow(');
+        indent.nest(1, () {
+          indent.writeln('${varNamePrefix}replyList,');
+          indent.writeln('${varNamePrefix}channelName,');
+          indent.writeln('isNullValid: true,');
+        });
+        indent.writeln(');');
+      });
+      indent.writeln('} catch (error, stackTrace) {');
+      indent.nest(1, () {
+        indent.writeln('_pigeonFfiEventControllers.remove(${varNamePrefix}sinkId);');
+        indent.writeln('${varNamePrefix}activeSinkId = null;');
+        indent.writeln('${varNamePrefix}controller.addError(error, stackTrace);');
+      });
+      indent.writeln('} finally {');
+      indent.nest(1, () {
+        indent.writeln('_freeFfiRequest(${varNamePrefix}request);');
+        indent.writeScoped('if (${varNamePrefix}response != ffi.nullptr) {', '}', () {
+          indent.writeln(
+            '$_defaultPigeonFfiBindings.pigeon_free_buffer(${varNamePrefix}response);',
+          );
+        });
+      });
+      indent.writeln('}');
+    });
+  }
+
+  void _writeFfiEventOnCancel(Indent indent, String cancelFunctionName) {
+    final String requestType = 'ffi.Pointer<$_pigeonFfiPrefix.PigeonFfiBuffer>';
+    indent.writeScoped('onCancel: () {', '},', () {
+      indent.writeln('final int? ${varNamePrefix}sinkId = ${varNamePrefix}activeSinkId;');
+      indent.writeScoped('if (${varNamePrefix}sinkId == null) {', '}', () {
+        indent.writeln('return;');
+      });
+      indent.writeln("final String ${varNamePrefix}channelName = '$cancelFunctionName';");
+      indent.writeln(
+        'final ByteData? ${varNamePrefix}requestMessage = '
+        '${varNamePrefix}codec.encodeMessage(<Object?>[instanceName]);',
+      );
+      indent.writeln(
+        'final $requestType ${varNamePrefix}request = '
+        '_encodeFfiRequest(${varNamePrefix}requestMessage);',
+      );
+      indent.writeln('$requestType ${varNamePrefix}response = ffi.nullptr;');
+      indent.writeln('try {');
+      indent.nest(1, () {
+        indent.writeln(
+          '${varNamePrefix}response = '
+          '$_defaultPigeonFfiBindings.$cancelFunctionName('
+          '${varNamePrefix}request, ${varNamePrefix}sinkId);',
+        );
+        indent.writeln(
+          'final List<Object?>? ${varNamePrefix}replyList = '
+          '_decodeFfiReply(${varNamePrefix}codec, ${varNamePrefix}response);',
+        );
+        indent.writeln('_extractReplyValueOrThrow(');
+        indent.nest(1, () {
+          indent.writeln('${varNamePrefix}replyList,');
+          indent.writeln('${varNamePrefix}channelName,');
+          indent.writeln('isNullValid: true,');
+        });
+        indent.writeln(');');
+      });
+      indent.writeln('} finally {');
+      indent.nest(1, () {
+        indent.writeln('_pigeonFfiEventControllers.remove(${varNamePrefix}sinkId);');
+        indent.writeln('${varNamePrefix}activeSinkId = null;');
+        indent.writeln('_freeFfiRequest(${varNamePrefix}request);');
+        indent.writeScoped('if (${varNamePrefix}response != ffi.nullptr) {', '}', () {
+          indent.writeln(
+            '$_defaultPigeonFfiBindings.pigeon_free_buffer(${varNamePrefix}response);',
+          );
+        });
+      });
+      indent.writeln('}');
+    });
   }
 
   @override
@@ -2634,11 +2810,17 @@ final $_pigeonFfiPrefix.${options.bindingClassName} $_pigeonFfiBindings;
     Indent indent, {
     required String dartPackageName,
   }) {
-    if (root.containsHostApi || root.containsProxyApi) {
+    if (root.containsHostApi ||
+        root.containsProxyApi ||
+        (generatorOptions.ffiOptions != null && root.containsEventChannel)) {
       _writeExtractReplyValueOrThrow(indent);
     }
     if (generatorOptions.ffiOptions != null) {
-      _writeFfiUtilities(indent);
+      _writeFfiUtilities(
+        generatorOptions.ffiOptions!,
+        indent,
+        includeEventChannelUtilities: root.containsEventChannel,
+      );
     }
     if (root.containsFlutterApi || root.containsProxyApi || generatorOptions.testOut != null) {
       _writeWrapResponse(generatorOptions, root, indent);
@@ -3118,7 +3300,11 @@ Object? _getValueFromPigeonTypedData($_ffiBridgePrefix.${_classNamePrefix}Pigeon
   }
 
   /// Writes Dart FFI helper methods.
-  void _writeFfiUtilities(Indent indent) {
+  void _writeFfiUtilities(
+    InternalDartFfiOptions options,
+    Indent indent, {
+    required bool includeEventChannelUtilities,
+  }) {
     indent.newln();
     indent.format('''
 ffi.Pointer<$_pigeonFfiPrefix.PigeonFfiBuffer> _encodeFfiRequest(ByteData? message) {
@@ -3154,6 +3340,127 @@ List<Object?>? _decodeFfiReply(
 \treturn codec.decodeMessage(ByteData.sublistView(bytes)) as List<Object?>?;
 }
 ''');
+    if (includeEventChannelUtilities) {
+      indent.format('''
+Object? _decodeFfiEvent(
+\t\tMessageCodec<Object?> codec,
+\t\tffi.Pointer<$_pigeonFfiPrefix.PigeonFfiBuffer> buffer,
+) {
+\tif (buffer == ffi.nullptr || buffer.ref.data == ffi.nullptr) {
+\t\treturn null;
+\t}
+\tfinal Uint8List bytes = Uint8List.fromList(buffer.ref.data.asTypedList(buffer.ref.length));
+\treturn codec.decodeMessage(ByteData.sublistView(bytes));
+}
+
+typedef _PigeonFfiEventCallbackNative = ffi.Void Function(
+\tffi.Int64 sinkId,
+\tffi.Pointer<$_pigeonFfiPrefix.PigeonFfiBuffer> event,
+);
+
+typedef _PigeonFfiDoneCallbackNative = ffi.Void Function(ffi.Int64 sinkId);
+
+abstract class _PigeonFfiEventController {
+\tMessageCodec<Object?> get codec;
+\tString get channelName;
+\tvoid addEvent(Object? event);
+\tvoid addError(Object error, StackTrace stackTrace);
+\tvoid close();
+}
+
+class _PigeonFfiEventControllerImpl<T> implements _PigeonFfiEventController {
+\t_PigeonFfiEventControllerImpl({
+\t\trequired this.controller,
+\t\trequired this.codec,
+\t\trequired this.channelName,
+\t\trequired this.decodeEvent,
+\t});
+
+\tfinal StreamController<T> controller;
+\t@override
+\tfinal MessageCodec<Object?> codec;
+\t@override
+\tfinal String channelName;
+\tfinal T Function(Object? event) decodeEvent;
+
+\t@override
+\tvoid addEvent(Object? event) {
+\t\tcontroller.add(decodeEvent(event));
+\t}
+
+\t@override
+\tvoid addError(Object error, StackTrace stackTrace) {
+\t\tcontroller.addError(error, stackTrace);
+\t}
+
+\t@override
+\tvoid close() {
+\t\tcontroller.close();
+\t}
+}
+
+final $_pigeonFfiPrefix.${options.bindingClassName} $_defaultPigeonFfiBindings =
+\t\t$_pigeonFfiPrefix.${options.bindingClassName}(${options.nativeLibraryExpression});
+
+final Map<int, _PigeonFfiEventController> _pigeonFfiEventControllers =
+\t\t<int, _PigeonFfiEventController>{};
+int _pigeonNextFfiEventSinkId = 1;
+
+final ffi.NativeCallable<_PigeonFfiEventCallbackNative> _pigeonFfiOnEventCallback =
+\t\tffi.NativeCallable<_PigeonFfiEventCallbackNative>.listener(_handlePigeonFfiEvent);
+final ffi.NativeCallable<_PigeonFfiEventCallbackNative> _pigeonFfiOnErrorCallback =
+\t\tffi.NativeCallable<_PigeonFfiEventCallbackNative>.listener(_handlePigeonFfiError);
+final ffi.NativeCallable<_PigeonFfiDoneCallbackNative> _pigeonFfiOnDoneCallback =
+\t\tffi.NativeCallable<_PigeonFfiDoneCallbackNative>.listener(_handlePigeonFfiDone);
+
+void _handlePigeonFfiEvent(
+\t\tint sinkId,
+\t\tffi.Pointer<$_pigeonFfiPrefix.PigeonFfiBuffer> event,
+) {
+\tfinal _PigeonFfiEventController? controller = _pigeonFfiEventControllers[sinkId];
+\ttry {
+\t\tif (controller != null) {
+\t\t\tcontroller.addEvent(_decodeFfiEvent(controller.codec, event));
+\t\t}
+\t} catch (error, stackTrace) {
+\t\tcontroller?.addError(error, stackTrace);
+\t} finally {
+\t\tif (event != ffi.nullptr) {
+\t\t\t$_defaultPigeonFfiBindings.pigeon_free_buffer(event);
+\t\t}
+\t}
+}
+
+void _handlePigeonFfiError(
+\t\tint sinkId,
+\t\tffi.Pointer<$_pigeonFfiPrefix.PigeonFfiBuffer> error,
+) {
+\tfinal _PigeonFfiEventController? controller = _pigeonFfiEventControllers[sinkId];
+\ttry {
+\t\tif (controller != null) {
+\t\t\tfinal List<Object?>? replyList = _decodeFfiReply(controller.codec, error);
+\t\t\t_extractReplyValueOrThrow(
+\t\t\t\treplyList,
+\t\t\t\tcontroller.channelName,
+\t\t\t\tisNullValid: true,
+\t\t\t);
+\t\t}
+\t} catch (errorObject, stackTrace) {
+\t\tcontroller?.addError(errorObject, stackTrace);
+\t} finally {
+\t\tif (error != ffi.nullptr) {
+\t\t\t$_defaultPigeonFfiBindings.pigeon_free_buffer(error);
+\t\t}
+\t}
+}
+
+void _handlePigeonFfiDone(int sinkId) {
+\tfinal _PigeonFfiEventController? controller =
+\t\t\t_pigeonFfiEventControllers.remove(sinkId);
+\tcontroller?.close();
+}
+''');
+    }
   }
 
   /// Writes the `wrapResponse` method.
@@ -3398,7 +3705,8 @@ if (wrapped == null) {
       'final String ${varNamePrefix}channelName = \'${_ffiFunctionName(api, method)}\';',
     );
     indent.writeln('$requestType ${varNamePrefix}response = ffi.nullptr;');
-    indent.writeScoped('try {', '} finally {', () {
+    indent.writeln('try {');
+    indent.nest(1, () {
       indent.writeln(
         '${varNamePrefix}response = '
         '$_pigeonFfiBindings.${_ffiFunctionName(api, method)}(${varNamePrefix}request);',
@@ -3422,13 +3730,15 @@ _extractReplyValueOrThrow(
         indent.format('final Object? $accessor = $extractCall;');
         indent.format('return ${_castValue(accessor, method.returnType)};');
       }
-    }, addTrailingNewline: false);
-    indent.addScoped(null, '}', () {
+    });
+    indent.writeln('} finally {');
+    indent.nest(1, () {
       indent.writeln('_freeFfiRequest(${varNamePrefix}request);');
       indent.writeScoped('if (${varNamePrefix}response != ffi.nullptr) {', '}', () {
         indent.writeln('$_pigeonFfiBindings.pigeon_free_buffer(${varNamePrefix}response);');
       });
     });
+    indent.writeln('}');
   }
 
   /// Writes the message call to a host method to [indent].
@@ -3792,6 +4102,14 @@ String addGenericTypes(TypeDeclaration type, {bool useJni = false, bool useFfi =
 
 String _ffiFunctionName(AstHostApi api, Method method) {
   return 'pigeon_${_snakeCase(api.name)}_${_snakeCase(method.name)}';
+}
+
+String _eventListenFunctionName(AstEventChannelApi api, Method method) {
+  return 'pigeon_${_snakeCase(api.name)}_${_snakeCase(method.name)}_listen';
+}
+
+String _eventCancelFunctionName(AstEventChannelApi api, Method method) {
+  return 'pigeon_${_snakeCase(api.name)}_${_snakeCase(method.name)}_cancel';
 }
 
 String _snakeCase(String name) {
