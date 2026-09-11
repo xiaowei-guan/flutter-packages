@@ -275,6 +275,20 @@ Dart HostApi caller
   -> hand-written C++ HostApi implementation
 ```
 
+Asynchronous HostApi methods use the same generated C ABI layer, but native
+code replies later through a generated callback:
+
+```text
+Dart HostApi caller
+  -> messages.g.dart Future<T>
+  -> messages.g.ffi.dart
+  -> messages_ffi.cc
+  -> optional PigeonFfiSyncDispatcher
+  -> hand-written C++ HostApi implementation
+  -> generated reply callback
+  -> Dart Completer<T>
+```
+
 FFI event streams use the same generated binding for `listen` and `cancel`,
 then send native events back through generated callbacks:
 
@@ -347,6 +361,9 @@ import 'package:pigeon/pigeon.dart';
 @HostApi()
 abstract class VideoPlayerApi {
   int create(String uri);
+
+  @async
+  int initialize(int playerId);
 
   void dispose(int playerId);
 }
@@ -450,6 +467,12 @@ class VideoPlayerApiImpl : public VideoPlayerApi {
     return 1;
   }
 
+  void Initialize(
+      int64_t player_id,
+      std::function<void(ErrorOr<int64_t> reply)> result) override {
+    result(0);
+  }
+
   std::optional<FlutterError> Dispose(int64_t player_id) override {
     return std::nullopt;
   }
@@ -494,6 +517,13 @@ void RegisterVideoPlayerApiFfi(
 should avoid deadlocks by running the task inline when already on the platform
 thread. The `api` and `dispatcher` pointers passed to `SetUpVideoPlayerApiFfi`
 must remain valid for as long as Dart can make FFI calls.
+
+For an async HostApi method, the generated FFI adapter decodes the request and
+starts the native call synchronously. The hand-written C++ implementation must
+call the generated `result` callback exactly once when the operation completes.
+It may call the callback before returning or later from another thread, but it
+must not keep references to generated argument objects beyond their valid
+lifetime unless it copies the data it needs.
 
 Make sure both `messages.cc` and `messages_ffi.cc` are included in the native
 build.
@@ -547,6 +577,6 @@ valid for as long as Dart can listen to the FFI stream.
 
 ## Limitations
 
-The C++ FFI generator currently supports synchronous HostApi methods and FFI
-event streams only. Asynchronous HostApi methods, FlutterApi, and ProxyApi are
+The C++ FFI generator currently supports synchronous HostApi methods,
+asynchronous HostApi methods, and FFI event streams. FlutterApi and ProxyApi are
 not supported by this C++ FFI path.

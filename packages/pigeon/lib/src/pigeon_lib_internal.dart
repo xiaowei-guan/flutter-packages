@@ -531,15 +531,6 @@ class DartGeneratorAdapter implements GeneratorAdapter {
         ),
       );
     }
-    for (final AstHostApi api in root.apis.whereType<AstHostApi>()) {
-      for (final Method method in api.methods) {
-        if (method.isAsynchronous || method.isAsynchronousCallback) {
-          errors.add(
-            Error(message: 'Dart FFI does not support async HostApi method "${method.name}"'),
-          );
-        }
-      }
-    }
     return errors;
   }
 }

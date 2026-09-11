@@ -2810,6 +2810,8 @@ final $_pigeonFfiPrefix.${options.bindingClassName} $_pigeonFfiBindings;
     Indent indent, {
     required String dartPackageName,
   }) {
+    final bool includeAsyncHostUtilities =
+        generatorOptions.ffiOptions != null && _containsAsyncHostApi(root);
     if (root.containsHostApi ||
         root.containsProxyApi ||
         (generatorOptions.ffiOptions != null && root.containsEventChannel)) {
@@ -2819,6 +2821,7 @@ final $_pigeonFfiPrefix.${options.bindingClassName} $_pigeonFfiBindings;
       _writeFfiUtilities(
         generatorOptions.ffiOptions!,
         indent,
+        includeAsyncHostUtilities: includeAsyncHostUtilities,
         includeEventChannelUtilities: root.containsEventChannel,
       );
     }
@@ -3303,6 +3306,7 @@ Object? _getValueFromPigeonTypedData($_ffiBridgePrefix.${_classNamePrefix}Pigeon
   void _writeFfiUtilities(
     InternalDartFfiOptions options,
     Indent indent, {
+    required bool includeAsyncHostUtilities,
     required bool includeEventChannelUtilities,
   }) {
     indent.newln();
@@ -3340,6 +3344,69 @@ List<Object?>? _decodeFfiReply(
 \treturn codec.decodeMessage(ByteData.sublistView(bytes)) as List<Object?>?;
 }
 ''');
+    if (includeAsyncHostUtilities || includeEventChannelUtilities) {
+      indent.format('''
+final $_pigeonFfiPrefix.${options.bindingClassName} $_defaultPigeonFfiBindings =
+\t\t$_pigeonFfiPrefix.${options.bindingClassName}(${options.nativeLibraryExpression});
+''');
+    }
+    if (includeAsyncHostUtilities) {
+      indent.format('''
+typedef _PigeonFfiReplyCallbackNative = ffi.Void Function(
+\tffi.Int64 replyId,
+\tffi.Pointer<$_pigeonFfiPrefix.PigeonFfiBuffer> reply,
+);
+
+class _PigeonFfiAsyncReply {
+\t_PigeonFfiAsyncReply({
+\t\trequired this.ffiBindings,
+\t\trequired this.codec,
+\t\trequired this.channelName,
+\t\trequired this.isNullValid,
+\t\trequired this.complete,
+\t\trequired this.completeError,
+\t});
+
+\tfinal $_pigeonFfiPrefix.${options.bindingClassName} ffiBindings;
+\tfinal MessageCodec<Object?> codec;
+\tfinal String channelName;
+\tfinal bool isNullValid;
+\tfinal void Function(Object? value) complete;
+\tfinal void Function(Object error, StackTrace stackTrace) completeError;
+}
+
+final Map<int, _PigeonFfiAsyncReply> _pigeonFfiAsyncReplies =
+\t\t<int, _PigeonFfiAsyncReply>{};
+int _pigeonNextFfiAsyncReplyId = 1;
+
+final ffi.NativeCallable<_PigeonFfiReplyCallbackNative> _pigeonFfiReplyCallback =
+\t\tffi.NativeCallable<_PigeonFfiReplyCallbackNative>.listener(_handlePigeonFfiReply);
+
+void _handlePigeonFfiReply(
+\t\tint replyId,
+\t\tffi.Pointer<$_pigeonFfiPrefix.PigeonFfiBuffer> reply,
+) {
+\tfinal _PigeonFfiAsyncReply? asyncReply = _pigeonFfiAsyncReplies.remove(replyId);
+\ttry {
+\t\tif (asyncReply != null) {
+\t\t\tfinal List<Object?>? replyList = _decodeFfiReply(asyncReply.codec, reply);
+\t\t\tfinal Object? replyValue = _extractReplyValueOrThrow(
+\t\t\t\treplyList,
+\t\t\t\tasyncReply.channelName,
+\t\t\t\tisNullValid: asyncReply.isNullValid,
+\t\t\t);
+\t\t\tasyncReply.complete(replyValue);
+\t\t}
+\t} catch (error, stackTrace) {
+\t\tasyncReply?.completeError(error, stackTrace);
+\t} finally {
+\t\tif (reply != ffi.nullptr) {
+\t\t\t(asyncReply?.ffiBindings ?? $_defaultPigeonFfiBindings).pigeon_free_buffer(reply);
+\t\t}
+\t}
+}
+''');
+    }
     if (includeEventChannelUtilities) {
       indent.format('''
 Object? _decodeFfiEvent(
@@ -3398,9 +3465,6 @@ class _PigeonFfiEventControllerImpl<T> implements _PigeonFfiEventController {
 \t\tcontroller.close();
 \t}
 }
-
-final $_pigeonFfiPrefix.${options.bindingClassName} $_defaultPigeonFfiBindings =
-\t\t$_pigeonFfiPrefix.${options.bindingClassName}(${options.nativeLibraryExpression});
 
 final Map<int, _PigeonFfiEventController> _pigeonFfiEventControllers =
 \t\t<int, _PigeonFfiEventController>{};
@@ -3682,6 +3746,10 @@ if (wrapped == null) {
   }
 
   void _writeFfiHostMethodCall(Indent indent, {required AstHostApi api, required Method method}) {
+    if (method.isAsynchronous || method.isAsynchronousCallback) {
+      _writeFfiAsyncHostMethodCall(indent, api: api, method: method);
+      return;
+    }
     final String requestType = 'ffi.Pointer<$_pigeonFfiPrefix.PigeonFfiBuffer>';
     if (method.parameters.isEmpty) {
       indent.writeln('final $requestType ${varNamePrefix}request = ffi.nullptr;');
@@ -3739,6 +3807,92 @@ _extractReplyValueOrThrow(
       });
     });
     indent.writeln('}');
+  }
+
+  void _writeFfiAsyncHostMethodCall(
+    Indent indent, {
+    required AstHostApi api,
+    required Method method,
+  }) {
+    final String requestType = 'ffi.Pointer<$_pigeonFfiPrefix.PigeonFfiBuffer>';
+    if (method.parameters.isEmpty) {
+      indent.writeln('final $requestType ${varNamePrefix}request = ffi.nullptr;');
+    } else {
+      final Iterable<String> argExpressions = indexMap(method.parameters, (
+        int index,
+        NamedType type,
+      ) {
+        return getParameterName(index, type);
+      });
+      indent.writeln(
+        'final ByteData? ${varNamePrefix}requestMessage = $pigeonChannelCodec.encodeMessage('
+        '<Object?>[${argExpressions.join(', ')}]);',
+      );
+      indent.writeln(
+        'final $requestType ${varNamePrefix}request = '
+        '_encodeFfiRequest(${varNamePrefix}requestMessage);',
+      );
+    }
+    indent.writeln(
+      'final String ${varNamePrefix}channelName = \'${_ffiFunctionName(api, method)}\';',
+    );
+    indent.writeln(
+      'final Completer<${addGenericTypes(method.returnType)}> ${varNamePrefix}completer = '
+      'Completer<${addGenericTypes(method.returnType)}>();',
+    );
+    indent.writeln('final int ${varNamePrefix}replyId = _pigeonNextFfiAsyncReplyId++;');
+    indent.writeScoped(
+      '_pigeonFfiAsyncReplies[${varNamePrefix}replyId] = _PigeonFfiAsyncReply(',
+      ');',
+      () {
+        indent.writeln('ffiBindings: $_pigeonFfiBindings,');
+        indent.writeln('codec: $pigeonChannelCodec,');
+        indent.writeln('channelName: ${varNamePrefix}channelName,');
+        indent.writeln('isNullValid: ${method.returnType.isNullable || method.returnType.isVoid},');
+        if (method.returnType.isVoid) {
+          indent.writeScoped('complete: (Object? _) {', '},', () {
+            indent.writeln('${varNamePrefix}completer.complete();');
+          });
+        } else {
+          indent.writeScoped('complete: (Object? ${varNamePrefix}replyValue) {', '},', () {
+            indent.writeln(
+              '${varNamePrefix}completer.complete('
+              '${_castValue('${varNamePrefix}replyValue', method.returnType)});',
+            );
+          });
+        }
+        indent.writeScoped('completeError: (Object error, StackTrace stackTrace) {', '},', () {
+          indent.writeln('${varNamePrefix}completer.completeError(error, stackTrace);');
+        });
+      },
+    );
+    indent.writeln('try {');
+    indent.nest(1, () {
+      indent.writeln('$_pigeonFfiBindings.${_ffiFunctionName(api, method)}(');
+      indent.nest(1, () {
+        indent.writeln('${varNamePrefix}request,');
+        indent.writeln('${varNamePrefix}replyId,');
+        indent.writeln('_pigeonFfiReplyCallback.nativeFunction,');
+      });
+      indent.writeln(');');
+    });
+    indent.writeln('} catch (error, stackTrace) {');
+    indent.nest(1, () {
+      indent.writeln('_pigeonFfiAsyncReplies.remove(${varNamePrefix}replyId);');
+      indent.writeScoped('if (!${varNamePrefix}completer.isCompleted) {', '}', () {
+        indent.writeln('${varNamePrefix}completer.completeError(error, stackTrace);');
+      });
+    });
+    indent.writeln('} finally {');
+    indent.nest(1, () {
+      indent.writeln('_freeFfiRequest(${varNamePrefix}request);');
+    });
+    indent.writeln('}');
+    if (method.returnType.isVoid) {
+      indent.writeln('await ${varNamePrefix}completer.future;');
+    } else {
+      indent.writeln('return await ${varNamePrefix}completer.future;');
+    }
   }
 
   /// Writes the message call to a host method to [indent].
@@ -4110,6 +4264,13 @@ String _eventListenFunctionName(AstEventChannelApi api, Method method) {
 
 String _eventCancelFunctionName(AstEventChannelApi api, Method method) {
   return 'pigeon_${_snakeCase(api.name)}_${_snakeCase(method.name)}_cancel';
+}
+
+bool _containsAsyncHostApi(Root root) {
+  return root.apis.whereType<AstHostApi>().any(
+    (AstHostApi api) =>
+        api.methods.any((Method method) => method.isAsynchronous || method.isAsynchronousCallback),
+  );
 }
 
 String _snakeCase(String name) {

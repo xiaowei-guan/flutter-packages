@@ -169,6 +169,86 @@ void main() {
     expect(code, isNot(contains('receiveBroadcastStream')));
   });
 
+  test('gen async host api with FFI reply callback', () {
+    final root = Root(
+      apis: <Api>[
+        AstHostApi(
+          name: 'Api',
+          methods: <Method>[
+            Method(
+              name: 'doSomething',
+              location: ApiLocation.host,
+              parameters: <Parameter>[
+                Parameter(
+                  type: TypeDeclaration(
+                    baseName: 'Input',
+                    isNullable: false,
+                    associatedClass: emptyClass,
+                  ),
+                  name: 'input',
+                ),
+              ],
+              returnType: TypeDeclaration(
+                baseName: 'Output',
+                isNullable: false,
+                associatedClass: emptyClass,
+              ),
+              isAsynchronous: true,
+            ),
+          ],
+        ),
+      ],
+      classes: <Class>[
+        Class(
+          name: 'Input',
+          fields: <NamedType>[
+            NamedType(
+              type: const TypeDeclaration(baseName: 'String', isNullable: true),
+              name: 'input',
+            ),
+          ],
+        ),
+        Class(
+          name: 'Output',
+          fields: <NamedType>[
+            NamedType(
+              type: const TypeDeclaration(baseName: 'String', isNullable: true),
+              name: 'output',
+            ),
+          ],
+        ),
+      ],
+      enums: <Enum>[],
+      containsHostApi: true,
+    );
+    final sink = StringBuffer();
+    const generator = DartGenerator();
+    generator.generate(
+      const InternalDartOptions(
+        ffiOptions: InternalDartFfiOptions(
+          bindingImportPath: 'messages.g.ffi.dart',
+          bindingClassName: 'MessagesFfiBindings',
+          nativeLibraryExpression: 'openLibrary()',
+        ),
+        ignoreLints: false,
+      ),
+      root,
+      sink,
+      dartPackageName: DEFAULT_PACKAGE_NAME,
+    );
+    final code = sink.toString();
+    expect(code, contains('typedef _PigeonFfiReplyCallbackNative'));
+    expect(code, contains('final Map<int, _PigeonFfiAsyncReply> _pigeonFfiAsyncReplies'));
+    expect(code, contains('NativeCallable<_PigeonFfiReplyCallbackNative>'));
+    expect(code, contains('Future<Output> doSomething(Input input) async'));
+    expect(code, contains('final Completer<Output> pigeonVar_completer = Completer<Output>();'));
+    expect(code, contains('_pigeonFfiAsyncReplies[pigeonVar_replyId] = _PigeonFfiAsyncReply('));
+    expect(code, contains('pigeon_ffi.MessagesFfiBindings(openLibrary())'));
+    expect(code, contains('pigeonVar_ffiBindings.pigeon_api_do_something('));
+    expect(code, contains('_pigeonFfiReplyCallback.nativeFunction'));
+    expect(code, contains('return await pigeonVar_completer.future;'));
+  });
+
   test('gen one host api', () {
     final root = Root(
       apis: <Api>[

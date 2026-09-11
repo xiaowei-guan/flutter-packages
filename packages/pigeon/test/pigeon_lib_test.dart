@@ -464,7 +464,7 @@ void main() {
     expect(errorsWithFfi, isEmpty);
   });
 
-  test('Dart FFI validation rejects async HostApi', () {
+  test('Dart FFI validation allows async HostApi', () {
     final root = Root(
       apis: <Api>[
         AstHostApi(
@@ -495,10 +495,7 @@ void main() {
       ),
       root,
     );
-    expect(
-      errors.map((Error error) => error.message),
-      contains('Dart FFI does not support async HostApi method "doSomething"'),
-    );
+    expect(errors, isEmpty);
   });
 
   test('parse args - ast_out', () {
@@ -2114,11 +2111,6 @@ abstract class Api {
 abstract class Api {
   int add(int x, int y);
 }
-
-@EventChannelApi()
-abstract class EventApi {
-  int streamEvents();
-}
 ''');
 
       final int result = await Pigeon.runWithOptions(
@@ -2208,6 +2200,9 @@ abstract class EventApi {
 @HostApi()
 abstract class Api {
   int add(int x, int y);
+
+  @async
+  int initialize(int x);
 }
 
 @EventChannelApi()
@@ -2289,6 +2284,8 @@ abstract class EventApi {
       final ffigenConfigCode = ffigenConfigFile.readAsStringSync();
 
       expect(dartCode, contains('MessagesFfiBindings'));
+      expect(dartCode, contains('Future<int> initialize'));
+      expect(dartCode, contains('_pigeonFfiReplyCallback.nativeFunction'));
       expect(dartCode, contains('Stream<int> streamEvents'));
       expect(dartCode, contains('pigeon_event_api_stream_events_listen'));
       expect(dartFfiCode, contains('fake ffigen'));
@@ -2297,6 +2294,7 @@ abstract class EventApi {
       expect(cppSourceCode, contains('Api::GetCodec'));
       expect(cppFfiHeaderCode, contains('PigeonFfiBuffer'));
       expect(cppFfiHeaderCode, contains('pigeon_api_add'));
+      expect(cppFfiHeaderCode, contains('PIGEON_FFI_EXPORT void pigeon_api_initialize('));
       expect(cppFfiHeaderCode, contains('pigeon_event_api_stream_events_listen'));
       expect(cppFfiHeaderCode, contains('namespace test_plugin {'));
       expect(cppFfiHeaderCode, contains('class PigeonFfiSyncDispatcher'));
@@ -2310,6 +2308,10 @@ abstract class EventApi {
         contains('PigeonFfiSyncDispatcher* g_event_api_stream_events_dispatcher = nullptr;'),
       );
       expect(cppFfiSourceCode, contains('return test_plugin::PigeonApiAddFfiDispatch(request);'));
+      expect(
+        cppFfiSourceCode,
+        contains('test_plugin::PigeonApiInitializeFfiDispatch(request, reply_id, on_reply);'),
+      );
       expect(
         cppFfiSourceCode,
         contains('return test_plugin::PigeonEventApiStreamEventsListenFfiDispatch'),

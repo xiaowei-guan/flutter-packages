@@ -20,7 +20,7 @@ Currently pigeon supports generating:
 * Kotlin and Java code for Android
 * Swift and Objective-C code for iOS and macOS
 * C++ code for Windows
-* Experimental C++ FFI adapter code for synchronous HostApi methods
+* Experimental C++ FFI adapter code for HostApi methods and event streams
 * GObject code for Linux
 
 ### Supported Datatypes

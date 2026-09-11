@@ -179,6 +179,7 @@ typedef struct PigeonFfiBuffer {
   size_t length;
 } PigeonFfiBuffer;
 
+typedef void (*PigeonFfiReplyCallback)(int64_t reply_id, PigeonFfiBuffer* reply);
 typedef void (*PigeonFfiEventCallback)(int64_t sink_id, PigeonFfiBuffer* event);
 typedef void (*PigeonFfiDoneCallback)(int64_t sink_id);
 ''');
@@ -189,9 +190,18 @@ typedef void (*PigeonFfiDoneCallback)(int64_t sink_id);
   );
   for (final AstHostApi api in root.apis.whereType<AstHostApi>()) {
     for (final Method method in api.methods) {
-      indent.writeln(
-        'PIGEON_FFI_EXPORT PigeonFfiBuffer* ${_ffiFunctionName(api, method)}(PigeonFfiBuffer* request);',
-      );
+      if (method.isAsynchronous || method.isAsynchronousCallback) {
+        indent.writeln('PIGEON_FFI_EXPORT void ${_ffiFunctionName(api, method)}(');
+        indent.nest(1, () {
+          indent.writeln('PigeonFfiBuffer* request,');
+          indent.writeln('int64_t reply_id,');
+          indent.writeln('PigeonFfiReplyCallback on_reply);');
+        });
+      } else {
+        indent.writeln(
+          'PIGEON_FFI_EXPORT PigeonFfiBuffer* ${_ffiFunctionName(api, method)}(PigeonFfiBuffer* request);',
+        );
+      }
     }
   }
   for (final AstEventChannelApi api in root.apis.whereType<AstEventChannelApi>()) {
@@ -369,6 +379,17 @@ PigeonFfiBuffer* PigeonFfiEncodeErrorMessage(
           ::flutter::EncodableValue(message),
           ::flutter::EncodableValue()}));
 }
+
+void PigeonFfiSendReply(
+    int64_t reply_id,
+    PigeonFfiReplyCallback on_reply,
+    PigeonFfiBuffer* reply) {
+  if (on_reply == nullptr) {
+    pigeon_free_buffer(reply);
+    return;
+  }
+  on_reply(reply_id, reply);
+}
 ''');
   });
   indent.writeln('}  // namespace');
@@ -405,14 +426,28 @@ void pigeon_free_buffer(PigeonFfiBuffer* buffer) {
       final String qualifiedHelper = options.namespace == null
           ? _ffiDispatchHelperName(api, method)
           : '${options.namespace}::${_ffiDispatchHelperName(api, method)}';
-      indent.writeln(
-        'extern "C" PigeonFfiBuffer* ${_ffiFunctionName(api, method)}(PigeonFfiBuffer* request) {',
-      );
-      indent.nest(1, () {
-        indent.writeln('return $qualifiedHelper(request);');
-      });
-      indent.writeln('}');
-      indent.newln();
+      if (method.isAsynchronous || method.isAsynchronousCallback) {
+        indent.writeln('extern "C" void ${_ffiFunctionName(api, method)}(');
+        indent.nest(1, () {
+          indent.writeln('PigeonFfiBuffer* request,');
+          indent.writeln('int64_t reply_id,');
+          indent.writeln('PigeonFfiReplyCallback on_reply) {');
+        });
+        indent.nest(1, () {
+          indent.writeln('$qualifiedHelper(request, reply_id, on_reply);');
+        });
+        indent.writeln('}');
+        indent.newln();
+      } else {
+        indent.writeln(
+          'extern "C" PigeonFfiBuffer* ${_ffiFunctionName(api, method)}(PigeonFfiBuffer* request) {',
+        );
+        indent.nest(1, () {
+          indent.writeln('return $qualifiedHelper(request);');
+        });
+        indent.writeln('}');
+        indent.newln();
+      }
     }
   }
   for (final AstEventChannelApi api in root.apis.whereType<AstEventChannelApi>()) {
@@ -474,8 +509,13 @@ void _writeApiSource(Indent indent, AstHostApi api) {
   indent.writeln('}');
   indent.newln();
   for (final Method method in api.methods) {
-    _writeMethodSource(indent, api, method);
-    _writeMethodDispatchSource(indent, api, method);
+    if (method.isAsynchronous || method.isAsynchronousCallback) {
+      _writeAsyncMethodSource(indent, api, method);
+      _writeAsyncMethodDispatchSource(indent, api, method);
+    } else {
+      _writeMethodSource(indent, api, method);
+      _writeMethodDispatchSource(indent, api, method);
+    }
   }
 }
 
@@ -806,6 +846,34 @@ void _writeMethodDispatchSource(Indent indent, AstHostApi api, Method method) {
   indent.newln();
 }
 
+void _writeAsyncMethodDispatchSource(Indent indent, AstHostApi api, Method method) {
+  indent.writeln('void ${_ffiDispatchHelperName(api, method)}(');
+  indent.nest(1, () {
+    indent.writeln('PigeonFfiBuffer* request,');
+    indent.writeln('int64_t reply_id,');
+    indent.writeln('PigeonFfiReplyCallback on_reply) {');
+  });
+  indent.nest(1, () {
+    indent.writeScoped('if (${_dispatcherVariable(api)} != nullptr) {', '}', () {
+      indent.writeScoped(
+        'PigeonFfiBuffer* dispatch_error = ${_dispatcherVariable(api)}->RunSync([=]() {',
+        '});',
+        () {
+          indent.writeln('${_ffiHelperName(api, method)}(request, reply_id, on_reply);');
+          indent.writeln('return static_cast<PigeonFfiBuffer*>(nullptr);');
+        },
+      );
+      indent.writeScoped('if (dispatch_error != nullptr) {', '}', () {
+        indent.writeln('PigeonFfiSendReply(reply_id, on_reply, dispatch_error);');
+      });
+      indent.writeln('return;');
+    });
+    indent.writeln('${_ffiHelperName(api, method)}(request, reply_id, on_reply);');
+  });
+  indent.writeln('}');
+  indent.newln();
+}
+
 void _writeMethodSource(Indent indent, AstHostApi api, Method method) {
   indent.writeln('PigeonFfiBuffer* ${_ffiHelperName(api, method)}(PigeonFfiBuffer* request) {');
   indent.nest(1, () {
@@ -888,6 +956,106 @@ void _writeMethodSource(Indent indent, AstHostApi api, Method method) {
   indent.newln();
 }
 
+void _writeAsyncMethodSource(Indent indent, AstHostApi api, Method method) {
+  indent.writeln('void ${_ffiHelperName(api, method)}(');
+  indent.nest(1, () {
+    indent.writeln('PigeonFfiBuffer* request,');
+    indent.writeln('int64_t reply_id,');
+    indent.writeln('PigeonFfiReplyCallback on_reply) {');
+  });
+  indent.nest(1, () {
+    indent.writeln('const auto& codec = ${api.name}::GetCodec();');
+    indent.writeScoped('if (${_apiVariable(api)} == nullptr) {', '}', () {
+      indent.writeln(
+        'PigeonFfiSendReply(reply_id, on_reply, PigeonFfiEncodeError(codec, ${api.name}::WrapError("${api.name} has not been set up.")));',
+      );
+      indent.writeln('return;');
+    });
+    indent.writeScoped('try {', '}', () {
+      final List<String> methodArguments = <String>[];
+      if (method.parameters.isNotEmpty) {
+        indent.writeScoped('if (request == nullptr || request->data == nullptr) {', '}', () {
+          indent.writeln(
+            'PigeonFfiSendReply(reply_id, on_reply, PigeonFfiEncodeError(codec, ${api.name}::WrapError("Request buffer is null.")));',
+          );
+          indent.writeln('return;');
+        });
+        indent.writeln(
+          'std::unique_ptr<::flutter::EncodableValue> message = codec.DecodeMessage(request->data, request->length);',
+        );
+        indent.writeScoped('if (!message) {', '}', () {
+          indent.writeln(
+            'PigeonFfiSendReply(reply_id, on_reply, PigeonFfiEncodeError(codec, ${api.name}::WrapError("Unable to decode request.")));',
+          );
+          indent.writeln('return;');
+        });
+        indent.writeln('const auto* args = std::get_if<::flutter::EncodableList>(message.get());');
+        indent.writeScoped(
+          'if (args == nullptr || args->size() != ${method.parameters.length}) {',
+          '}',
+          () {
+            indent.writeln(
+              'PigeonFfiSendReply(reply_id, on_reply, PigeonFfiEncodeError(codec, ${api.name}::WrapError("Unexpected request arguments.")));',
+            );
+            indent.writeln('return;');
+          },
+        );
+        for (var index = 0; index < method.parameters.length; index++) {
+          final Parameter parameter = method.parameters[index];
+          final HostDatatype hostType = getHostDatatype(
+            parameter.type,
+            _baseCppTypeForBuiltinDartType,
+          );
+          final String argName = _safeArgumentName(index, parameter);
+          final String encodableArgName = 'encodable_$argName';
+          indent.writeln('const auto& $encodableArgName = args->at($index);');
+          if (!parameter.type.isNullable) {
+            indent.writeScoped('if ($encodableArgName.IsNull()) {', '}', () {
+              indent.writeln(
+                'PigeonFfiSendReply(reply_id, on_reply, PigeonFfiEncodeError(codec, ${api.name}::WrapError("$argName unexpectedly null.")));',
+              );
+              indent.writeln('return;');
+            });
+          }
+          _writeEncodableValueArgumentUnwrapping(
+            indent,
+            hostType,
+            argName: argName,
+            encodableArgName: encodableArgName,
+          );
+          methodArguments.add(argName);
+        }
+      }
+
+      final HostDatatype returnType = getHostDatatype(
+        method.returnType,
+        _baseCppTypeForBuiltinDartType,
+      );
+      final String returnTypeName = _hostApiReturnType(returnType);
+      indent.writeln('${_apiVariable(api)}->${_methodName(method)}(');
+      indent.nest(1, () {
+        for (final String argument in methodArguments) {
+          indent.writeln('$argument,');
+        }
+        indent.writeln('[reply_id, on_reply]($returnTypeName&& output) {');
+        indent.nest(1, () {
+          indent.writeln('const auto& codec = ${api.name}::GetCodec();');
+          _writeAsyncReplyEncoding(indent, method.returnType, returnType, api.name);
+        });
+        indent.writeln('});');
+      });
+    }, addTrailingNewline: false);
+    indent.add(' catch (const std::exception& exception) ');
+    indent.addScoped('{', '}', () {
+      indent.writeln(
+        'PigeonFfiSendReply(reply_id, on_reply, PigeonFfiEncodeError(codec, ${api.name}::WrapError(exception.what())));',
+      );
+    });
+  });
+  indent.writeln('}');
+  indent.newln();
+}
+
 void _writeReturnEncoding(
   Indent indent,
   TypeDeclaration dartReturnType,
@@ -925,6 +1093,56 @@ void _writeReturnEncoding(
     'return PigeonFfiEncodeMessage(codec, '
     '::flutter::EncodableValue(::flutter::EncodableList{'
     '$wrapperType(output.value())}));',
+  );
+}
+
+void _writeAsyncReplyEncoding(
+  Indent indent,
+  TypeDeclaration dartReturnType,
+  HostDatatype hostReturnType,
+  String apiName,
+) {
+  if (dartReturnType.isVoid) {
+    indent.writeScoped('if (output.has_value()) {', '}', () {
+      indent.writeln(
+        'PigeonFfiSendReply(reply_id, on_reply, PigeonFfiEncodeError(codec, $apiName::WrapError(output.value())));',
+      );
+      indent.writeln('return;');
+    });
+    indent.writeln(
+      'PigeonFfiSendReply(reply_id, on_reply, PigeonFfiEncodeMessage(codec, ::flutter::EncodableValue(::flutter::EncodableList{::flutter::EncodableValue()})));',
+    );
+    return;
+  }
+
+  indent.writeScoped('if (output.has_error()) {', '}', () {
+    indent.writeln(
+      'PigeonFfiSendReply(reply_id, on_reply, PigeonFfiEncodeError(codec, $apiName::WrapError(output.error())));',
+    );
+    indent.writeln('return;');
+  });
+  final String wrapperType = hostReturnType.isBuiltin
+      ? '::flutter::EncodableValue'
+      : '::flutter::CustomEncodableValue';
+  if (dartReturnType.isNullable) {
+    indent.writeScoped('if (output.value()) {', '} else {', () {
+      final encodedValue = '$wrapperType(output.value().value())';
+      indent.writeln(
+        'PigeonFfiSendReply(reply_id, on_reply, PigeonFfiEncodeMessage(codec, '
+        '::flutter::EncodableValue(::flutter::EncodableList{$encodedValue})));',
+      );
+    });
+    indent.addScoped(null, '}', () {
+      indent.writeln(
+        'PigeonFfiSendReply(reply_id, on_reply, PigeonFfiEncodeMessage(codec, ::flutter::EncodableValue(::flutter::EncodableList{::flutter::EncodableValue()})));',
+      );
+    });
+    return;
+  }
+  indent.writeln(
+    'PigeonFfiSendReply(reply_id, on_reply, PigeonFfiEncodeMessage(codec, '
+    '::flutter::EncodableValue(::flutter::EncodableList{'
+    '$wrapperType(output.value())})));',
   );
 }
 
@@ -1000,13 +1218,7 @@ List<Error> validateCppFfi(InternalCppFfiOptions options, Root root) {
   for (final Api api in root.apis) {
     switch (api) {
       case AstHostApi():
-        for (final Method method in api.methods) {
-          if (method.isAsynchronous) {
-            errors.add(
-              Error(message: 'C++ FFI does not support async HostApi method "${method.name}"'),
-            );
-          }
-        }
+        break;
       case AstFlutterApi():
         errors.add(Error(message: 'C++ FFI does not support FlutterApi "${api.name}"'));
       case AstEventChannelApi():

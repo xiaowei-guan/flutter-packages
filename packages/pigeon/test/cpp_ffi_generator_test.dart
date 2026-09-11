@@ -150,6 +150,93 @@ void main() {
     expect(code, isNot(contains('TODO')));
   });
 
+  test('generates C ABI adapter for async HostApi', () {
+    final root = Root(
+      apis: <Api>[
+        AstHostApi(
+          name: 'CalculatorApi',
+          methods: <Method>[
+            Method(
+              name: 'add',
+              parameters: <Parameter>[
+                Parameter(
+                  type: const TypeDeclaration(baseName: 'int', isNullable: false),
+                  name: 'x',
+                ),
+                Parameter(
+                  type: const TypeDeclaration(baseName: 'int', isNullable: false),
+                  name: 'y',
+                ),
+              ],
+              location: ApiLocation.host,
+              returnType: const TypeDeclaration(baseName: 'int', isNullable: false),
+              isAsynchronous: true,
+            ),
+          ],
+        ),
+      ],
+      classes: <Class>[],
+      enums: <Enum>[],
+    );
+
+    final headerSink = StringBuffer();
+    const CppFfiGenerator().generate(
+      OutputFileOptions<InternalCppFfiOptions>(
+        fileType: FileType.header,
+        languageOptions: InternalCppFfiOptions(
+          headerIncludePath: 'messages_ffi.h',
+          apiHeaderIncludePath: 'messages.h',
+          cppFfiHeaderOut: 'messages_ffi.h',
+          cppFfiSourceOut: 'messages_ffi.cc',
+          namespace: 'test',
+        ),
+      ),
+      root,
+      headerSink,
+      dartPackageName: _packageName,
+    );
+
+    final headerCode = headerSink.toString();
+    expect(headerCode, contains('typedef void (*PigeonFfiReplyCallback)'));
+    expect(headerCode, contains('PIGEON_FFI_EXPORT void pigeon_calculator_api_add('));
+    expect(headerCode, contains('int64_t reply_id,'));
+    expect(headerCode, contains('PigeonFfiReplyCallback on_reply);'));
+
+    final sourceSink = StringBuffer();
+    const CppFfiGenerator().generate(
+      OutputFileOptions<InternalCppFfiOptions>(
+        fileType: FileType.source,
+        languageOptions: InternalCppFfiOptions(
+          headerIncludePath: 'messages_ffi.h',
+          apiHeaderIncludePath: 'messages.h',
+          cppFfiHeaderOut: 'messages_ffi.h',
+          cppFfiSourceOut: 'messages_ffi.cc',
+          namespace: 'test',
+        ),
+      ),
+      root,
+      sourceSink,
+      dartPackageName: _packageName,
+    );
+
+    final sourceCode = sourceSink.toString();
+    expect(sourceCode, contains('void PigeonFfiSendReply('));
+    expect(sourceCode, contains('void PigeonCalculatorApiAddFfi('));
+    expect(sourceCode, contains('[reply_id, on_reply](ErrorOr<int64_t>&& output)'));
+    expect(sourceCode, contains('PigeonFfiSendReply(reply_id, on_reply'));
+    expect(sourceCode, contains('void PigeonCalculatorApiAddFfiDispatch('));
+    expect(
+      sourceCode,
+      contains('PigeonFfiBuffer* dispatch_error = g_calculator_api_dispatcher->RunSync([=]() {'),
+    );
+    expect(sourceCode, contains('return static_cast<PigeonFfiBuffer*>(nullptr);'));
+    expect(sourceCode, contains('extern "C" void pigeon_calculator_api_add('));
+    expect(
+      sourceCode,
+      contains('test::PigeonCalculatorApiAddFfiDispatch(request, reply_id, on_reply);'),
+    );
+  });
+
   test('generates C ABI adapter for EventChannelApi', () {
     final root = Root(
       apis: <Api>[
@@ -279,10 +366,13 @@ void main() {
     expect(
       errors.map((Error error) => error.message),
       containsAll(<String>[
-        'C++ FFI does not support async HostApi method "doIt"',
         'C++ FFI does not support FlutterApi "CallbackApi"',
         'C++ FFI does not support void EventChannelApi method "streamEvents"',
       ]),
+    );
+    expect(
+      errors.map((Error error) => error.message),
+      isNot(contains('C++ FFI does not support async HostApi method "doIt"')),
     );
   });
 }
